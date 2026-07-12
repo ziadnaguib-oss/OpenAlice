@@ -6,7 +6,7 @@
  * a bare ticker is ambiguous (`700` exists on multiple boards).
  */
 
-import { Contract, ContractDescription, OrderState } from '@traderalice/ibkr'
+import { type Contract, ContractDescription, OrderState } from '@traderalice/ibkr'
 import '../../contract-ext.js'
 import { buildContract } from '../contract-builder.js'
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { type AppConfig, type NewsCollectorConfig, type NewsCollectorFeed } from '../api'
+import type { AppConfig, NewsCollectorConfig, NewsCollectorFeed } from '../api'
 import { SaveIndicator } from '../components/SaveIndicator'
 import { ConfigSection, Field, inputClass } from '../components/form'
 import { Toggle } from '../components/Toggle'

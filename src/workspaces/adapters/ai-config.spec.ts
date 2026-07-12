@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js';
 /**
  * Characterization / golden test for the per-workspace AI-config writers after
  * they moved out of the webui routes into the CLI adapters (Phase A). The
@@ -6,7 +7,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,7 +24,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'aicfg-'));
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rmrf(dir);
 });
 
 const read = (rel: string): Promise<string> => readFile(join(dir, rel), 'utf8');

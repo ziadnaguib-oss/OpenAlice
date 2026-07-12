@@ -18,7 +18,7 @@
  * machinery available; later phases enforce it.
  */
 
-import { Contract, UNSET_DOUBLE, type SecType } from '@traderalice/ibkr'
+import { type Contract, UNSET_DOUBLE, type SecType } from '@traderalice/ibkr'
 
 // Re-export so callers under `domain/trading/*` can keep importing SecType
 // from this module — the canonical definition lives in @traderalice/ibkr

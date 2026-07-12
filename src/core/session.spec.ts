@@ -1,8 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { toModelMessages, toTextHistory, toChatHistory, SessionStore, MemorySessionStore, type SessionEntry, type ContentBlock } from './session.js'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 
 // ==================== Helpers ====================
 

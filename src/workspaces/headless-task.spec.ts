@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js';
 import { describe, expect, it } from 'vitest';
 
 import { runHeadlessTask } from './headless-task.js';
@@ -165,7 +166,7 @@ describe('runHeadlessTask', () => {
       expect(full.length).toBe(64 * 1024);
       expect(await readFile(stderrFile, 'utf8')).toBe('E-DIAG');
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rmrf(dir);
     }
   });
 });

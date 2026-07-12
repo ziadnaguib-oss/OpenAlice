@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -48,7 +49,7 @@ afterEach(async () => {
   if (savedHome === undefined) delete process.env['OPENALICE_HOME']
   else process.env['OPENALICE_HOME'] = savedHome
   vi.resetModules()
-  await rm(home, { recursive: true, force: true })
+  await rmrf(home)
 })
 
 describe('0009_seal_broker_credentials', () => {

@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { rmrf } from '@/spec-helpers/fs.js'
+import { mkdtemp, } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,7 +13,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'issues-mutate-'))
 })
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
+  await rmrf(dir)
 })
 
 /** Read one issue back through the real reader (the round-trip oracle). */

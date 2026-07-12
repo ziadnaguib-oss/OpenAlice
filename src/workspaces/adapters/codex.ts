@@ -206,7 +206,7 @@ export const codexAdapter: CliAdapter = {
       // `[model_providers.workspace]` with `base_url`, `wire_api`, plus
       // top-level `model`. Regex is brittle in general but our shape is
       // controlled (writer above produces deterministic output).
-      const providerBlock = tomlRaw.match(/\[model_providers\.workspace\][^\[]*/);
+      const providerBlock = tomlRaw.match(/\[model_providers\.workspace\][^[]*/);
       if (providerBlock) {
         const block = providerBlock[0];
         const base = block.match(/base_url\s*=\s*"([^"]*)"/);

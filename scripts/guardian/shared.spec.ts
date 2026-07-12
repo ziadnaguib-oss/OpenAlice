@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { rmrf } from '@/spec-helpers/fs.js'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,7 +13,7 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'guardian-ports-'))
 })
 afterEach(async () => {
-  await rm(home, { recursive: true, force: true })
+  await rmrf(home)
 })
 
 async function writePortsFile(content: string): Promise<void> {
@@ -141,7 +142,7 @@ describe('resolveGuardianTradingMode', () => {
     await writeConfigFile('accounts.json', '[{ "id": "alpaca" }]')
     await expect(resolveGuardianTradingMode({}, home)).resolves.toMatchObject({ mode: 'pro', source: 'auto', hasUTAConfig: true })
 
-    await rm(home, { recursive: true, force: true })
+    await rmrf(home)
     home = await mkdtemp(join(tmpdir(), 'guardian-ports-'))
     await expect(resolveGuardianTradingMode({}, home)).resolves.toMatchObject({ mode: 'lite', source: 'auto', hasUTAConfig: false })
   })

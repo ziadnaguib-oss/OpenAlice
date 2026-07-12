@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import Decimal from 'decimal.js'
-import { Contract, Order, UNSET_DOUBLE, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { Contract, Order, } from '@traderalice/ibkr'
 
 // Mock ccxt BEFORE importing CcxtBroker
 vi.mock('ccxt', () => {

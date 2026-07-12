@@ -17,7 +17,6 @@ import { aggregateSymbolSearch, type AssetClass } from '../aggregate-search.js'
 import type {
   BarService,
   BarServiceDeps,
-  BarSourceRef,
   BarSourceCandidate,
   GetBarsOpts,
   BarsResult,

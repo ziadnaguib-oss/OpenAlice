@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, } from 'vitest'
 import Decimal from 'decimal.js'
-import { Contract, Order, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { Order, } from '@traderalice/ibkr'
 import { MaxPositionSizeGuard } from './max-position-size.js'
 import { CooldownGuard } from './cooldown.js'
 import { SymbolWhitelistGuard } from './symbol-whitelist.js'

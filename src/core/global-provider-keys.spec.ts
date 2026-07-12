@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 /**
  * User-global provider keys — merge-under + mirror-on-save semantics.
  *
@@ -10,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtemp, readFile, writeFile, rm, mkdir } from 'fs/promises'
+import { mkdtemp, readFile, writeFile, mkdir } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -30,8 +31,8 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env['OPENALICE_HOME']
   delete process.env['OPENALICE_GLOBAL_DIR']
-  await rm(dataHome, { recursive: true, force: true })
-  await rm(globalDir, { recursive: true, force: true })
+  await rmrf(dataHome)
+  await rmrf(globalDir)
 })
 
 async function seedGlobal(keys: Record<string, string>) {

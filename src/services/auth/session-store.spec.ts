@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 /**
  * Session store smoke tests.
  *
@@ -5,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -32,7 +33,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env['OPENALICE_SESSIONS_FILE']
-  await rm(tmpDir, { recursive: true, force: true })
+  await rmrf(tmpDir)
 })
 
 beforeEach(async () => {

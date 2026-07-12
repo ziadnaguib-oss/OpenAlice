@@ -1,0 +1,20 @@
+# Git hooks — installed by the root `prepare` script (`lefthook install`).
+# Philosophy: pre-commit stays fast (staged files only, < 10s typical);
+# the full typecheck runs on pre-push where latency is acceptable.
+# Commands deliberately avoid `pnpm exec` — hooks must not depend on the
+# pnpm version switcher's environment. Bypass in an emergency with
+# `git commit --no-verify`; CI still gates everything.
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: lint
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
+      run: npx biome lint --no-errors-on-unmatched {staged_files}
+    - name: secret-scan
+      run: node scripts/git-hooks/secret-scan.mjs
+
+pre-push:
+  jobs:
+    - name: typecheck
+      run: npx tsc --noEmit

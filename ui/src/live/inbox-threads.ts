@@ -58,7 +58,7 @@ export function previewForEntry(entry: InboxEntry): string {
   const c = (entry.comments ?? '').trim()
   if (c) {
     const firstLine = c.split('\n').find((l) => l.trim().length > 0) ?? ''
-    return firstLine.replace(/^[#>*\-]+\s*/, '').trim()
+    return firstLine.replace(/^[#>*-]+\s*/, '').trim()
   }
   if (entry.docs && entry.docs.length > 0) {
     const d = entry.docs[0]

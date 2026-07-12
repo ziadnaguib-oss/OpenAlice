@@ -1,6 +1,7 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -104,7 +105,7 @@ describe('CLI launchers and payload', () => {
       expect(seen).toEqual(['/cli/ws1/data/manifest'])
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
-      await rm(dir, { recursive: true, force: true })
+      await rmrf(dir)
     }
   })
 
@@ -132,7 +133,7 @@ describe('CLI launchers and payload', () => {
       })
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
-      await rm(dir, { recursive: true, force: true })
+      await rmrf(dir)
     }
   })
 

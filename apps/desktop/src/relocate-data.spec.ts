@@ -17,8 +17,8 @@ describe('relocateLegacyData', () => {
   })
 
   afterEach(async () => {
-    await rm(legacyRoot, { recursive: true, force: true })
-    await rm(newRoot, { recursive: true, force: true })
+    await rm(legacyRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    await rm(newRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 
   async function seedLegacyStore(): Promise<void> {

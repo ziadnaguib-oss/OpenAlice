@@ -5,7 +5,7 @@
  * Now returns IBKR Contract class instances with aliceId extension.
  */
 
-import { Contract, OrderState } from '@traderalice/ibkr'
+import { type Contract, OrderState } from '@traderalice/ibkr'
 import '../../contract-ext.js'
 import { buildContract } from '../contract-builder.js'
 import type { BarInterval } from '../types.js'

@@ -1,5 +1,6 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -34,7 +35,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'mig0011-'))
 })
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true })
+  await rmrf(root)
 })
 
 describe('0011 workspace issue assignee defaults', () => {

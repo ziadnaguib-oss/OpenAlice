@@ -26,10 +26,19 @@ troubleshooting. Process topology and state layout live in
 ```bash
 pnpm install              # full install, including the Electron binary
 pnpm dev                  # Guardian -> UTA + Alice + Vite (UI URL is printed)
+pnpm lint                 # Biome linter (same gate CI runs on all three OSes)
 pnpm typecheck            # tsc --noEmit on src/
 pnpm test                 # monorepo Vitest suite
 pnpm build                # turbo packages + UI + UTA + tsup main bundle
 ```
+
+`pnpm install` also installs git hooks via lefthook (`lefthook.yml`):
+pre-commit lints staged files with Biome and, when the optional
+[gitleaks](https://github.com/gitleaks/gitleaks) binary is on `PATH`, scans
+them for secrets; pre-push runs the full typecheck. `pnpm lint:fix` applies
+Biome's safe fixes. The lint scope deliberately excludes `packages/` (ported
+protocol/compat code) and CSS for now; a11y and React-hook findings surface as
+non-gating warnings until they are burned down.
 
 Headless, proxied, or CI-like environments (containers, Claude Code on the
 web) often cannot download the Electron binary, and don't need it:

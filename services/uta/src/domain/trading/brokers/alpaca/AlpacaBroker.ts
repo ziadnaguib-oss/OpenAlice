@@ -11,7 +11,7 @@
 import { z } from 'zod'
 import Alpaca from '@alpacahq/alpaca-trade-api'
 import Decimal from 'decimal.js'
-import { Contract, ContractDescription, ContractDetails, Order, OrderState, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { type Contract, ContractDescription, ContractDetails, Order, OrderState, UNSET_DECIMAL } from '@traderalice/ibkr'
 import {
   BrokerError,
   type IBroker,
@@ -37,7 +37,7 @@ import type {
   AlpacaClockRaw,
   AlpacaBarRaw,
 } from './alpaca-types.js'
-import { makeContract, resolveSymbol, mapAlpacaOrderStatus, makeOrderState, ALPACA_TIMEFRAME } from './alpaca-contracts.js'
+import { makeContract, resolveSymbol, makeOrderState, ALPACA_TIMEFRAME } from './alpaca-contracts.js'
 import { buildPosition } from '../contract-builder.js'
 import { fuzzyRankContracts, type FuzzyRankInput } from '../fuzzy-rank.js'
 

@@ -92,9 +92,41 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - run: pnpm lint
+
       - run: pnpm build
 
       - run: pnpm test
+
+  # Fast conventions-and-supply-chain gate: secret scanning over the full git
+  # history (gitleaks) plus a dependency-advisory check that fails on
+  # high/critical findings. Ubuntu-only — neither check is platform-sensitive.
+  quality:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
+          # gitleaks scans commit history, not just the checkout.
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm audit --audit-level high
 
   # The full Vitest suite includes path, port-binding, process-launch, and
   # packaged-toolchain behavior whose semantics differ materially by host OS.
@@ -122,6 +154,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
 
       - run: pnpm build
         timeout-minutes: 15

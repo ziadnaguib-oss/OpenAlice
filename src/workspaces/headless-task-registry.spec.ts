@@ -1,5 +1,6 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -28,7 +29,7 @@ afterEach(async () => {
   // The registry deletes pruned tasks' log files fire-and-forget (`void rm(…)`),
   // which can race this recursive cleanup on Windows and throw ENOTEMPTY on the
   // parent dir. `maxRetries` makes fs.rm retry exactly this class of error.
-  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  await rmrf(dir)
 })
 
 describe('HeadlessTaskRegistry', () => {

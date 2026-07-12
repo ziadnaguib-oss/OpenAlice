@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useWorkspace } from '../tabs/store'
-import { type Tab } from '../tabs/types'
+import type { Tab } from '../tabs/types'
 import { getView } from '../tabs/registry'
 import { TabStrip } from './TabStrip'
 import { EmptyEditor } from './EmptyEditor'

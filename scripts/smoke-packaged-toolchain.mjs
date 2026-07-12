@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { delimiter, dirname, join, relative, resolve } from 'node:path'
+import { delimiter, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { assertDesktopPackage } from './assert-desktop-package.mjs'

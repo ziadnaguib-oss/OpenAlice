@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import { readFile } from 'node:fs/promises';
-import { join, resolve as resolvePath } from 'node:path';
+import { join, } from 'node:path';
 
 import { probeByWireShape } from '../../workspaces/agent-probe.js';
 import type { WireShape } from '../../ai-providers/preset-catalog.js';

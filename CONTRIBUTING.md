@@ -43,6 +43,15 @@ This policy is not about contribution quality. It is about keeping the trading
 security surface controlled while still recognizing the people whose ideas,
 reports, and PRs move the project forward.
 
+## Code Conventions Are Tool-Enforced
+
+`pnpm lint` (Biome) gates every PR on all three CI platforms, alongside a
+secret scan (gitleaks) and a dependency-advisory check. Locally, `pnpm install`
+wires git hooks (lefthook): pre-commit lints your staged files and scans them
+for secrets when gitleaks is installed; pre-push runs the full typecheck. Run
+`pnpm lint:fix` for auto-fixes. Hooks can be bypassed with `--no-verify` in an
+emergency — CI still enforces everything.
+
 ## Other Ways to Contribute
 
 Issues are still very welcome. If you've found a bug or have an idea, file it —

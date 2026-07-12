@@ -12,7 +12,7 @@
  */
 
 import Decimal from 'decimal.js'
-import { Contract, Order, UNSET_DECIMAL, UNSET_DOUBLE } from '@traderalice/ibkr'
+import { type Contract, type Order, UNSET_DECIMAL, UNSET_DOUBLE } from '@traderalice/ibkr'
 import type {
   GitCommit,
   HistoryContract,
@@ -107,7 +107,6 @@ export function projectOrderHistory(commits: GitCommit[], opts: { limit?: number
           target.status = 'cancelled'
           target.resolvedAt = commit.timestamp
         }
-        continue
       }
     }
 

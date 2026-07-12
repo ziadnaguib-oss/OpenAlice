@@ -7,7 +7,6 @@
 
 import Decimal from 'decimal.js'
 import type { Contract, ContractDescription, ContractDetails } from '@traderalice/ibkr'
-import type { AccountCapabilities, BrokerHealth, BrokerHealthInfo } from './brokers/types.js'
 import { CcxtBroker } from './brokers/ccxt/CcxtBroker.js'
 import { createCcxtProviderTools } from './brokers/ccxt/ccxt-tools.js'
 import { createBroker } from './brokers/factory.js'

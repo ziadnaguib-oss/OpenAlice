@@ -1,5 +1,6 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { normalizeBacklinkPath, scanBacklinks } from './entity-backlinks.js'
@@ -15,7 +16,7 @@ describe('scanBacklinks', () => {
     root = await mkdtemp(join(tmpdir(), 'oa-backlinks-'))
   })
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
+    await rmrf(root)
   })
 
   it('gathers [[name]] links across workspaces — case-insensitive, deduped per file, scaffolding skipped', async () => {

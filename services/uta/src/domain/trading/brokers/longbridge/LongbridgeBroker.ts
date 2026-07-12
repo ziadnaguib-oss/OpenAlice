@@ -17,7 +17,7 @@
 
 import { z } from 'zod'
 import Decimal from 'decimal.js'
-import { Contract, ContractDescription, ContractDetails, Order, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { type Contract, type ContractDescription, ContractDetails, Order, UNSET_DECIMAL } from '@traderalice/ibkr'
 import {
   Config,
   TradeContext,

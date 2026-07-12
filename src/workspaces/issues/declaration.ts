@@ -226,7 +226,7 @@ export function parseIssueContent(
       id,
       ...parsed.data,
       body: split.body,
-      assigneeDefaulted: !Object.prototype.hasOwnProperty.call(rawFrontmatter, 'assignee'),
+      assigneeDefaulted: !Object.hasOwn(rawFrontmatter, 'assignee'),
     },
   }
 }

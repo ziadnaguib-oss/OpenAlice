@@ -786,8 +786,8 @@ describe('LongbridgeBroker — getMarketClock()', () => {
     // Spoof the wall clock to a time outside the window.
     const originalGetHours = Date.prototype.getHours
     const originalGetMinutes = Date.prototype.getMinutes
-    Date.prototype.getHours = function () { return 12 }
-    Date.prototype.getMinutes = function () { return 0 }
+    Date.prototype.getHours = () => 12
+    Date.prototype.getMinutes = () => 0
     try {
       const clock = await b.getMarketClock()
       expect(clock.isOpen).toBe(false)

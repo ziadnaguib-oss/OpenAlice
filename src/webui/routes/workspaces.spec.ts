@@ -1,10 +1,11 @@
+import { rmrf } from '@/spec-helpers/fs.js';
 /**
  * POST /:id/headless — the automation dispatch route. Covers the validation /
  * agent-resolution / dispatch branches against a stubbed WorkspaceService
  * (no real spawn). Modeled on trading-config.spec's harness.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -138,7 +139,7 @@ describe('PATCH /:id/metadata', () => {
       const readBack = await readWorkspaceMetadata(dir);
       expect(readBack).toEqual({ ok: true, metadata: { displayName: 'AAPL earnings review' } });
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rmrf(dir);
     }
   });
 
@@ -153,7 +154,7 @@ describe('PATCH /:id/metadata', () => {
       expect(r.body.workspace.tag).toBe('stable-tag');
       expect(r.body.workspace.displayName).toBe('Nice label');
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rmrf(dir);
     }
   });
 });
@@ -408,7 +409,7 @@ describe('POST /:id/sessions/:sid/resume — concurrent coalescing (ANG-120)', (
       startedAt: 1,
       waitForFirstExit: vi.fn(async () => null), // stays up
     };
-    let live: unknown = undefined; // what pool.get returns; set once spawned
+    let live: unknown ; // what pool.get returns; set once spawned
     const spawn = vi.fn(() => {
       live = session;
       return session;
