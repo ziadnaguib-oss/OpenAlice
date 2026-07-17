@@ -1,25 +1,40 @@
-# Secret scanning configuration (SE-4). Runs in CI on every PR/push and in the
-# pre-commit hook when the gitleaks binary is installed locally.
+# Secret scanning configuration (SE-4). Runs in CI on every PR/push (pinned
+# CLI, full git history) and in the pre-commit hook when the gitleaks binary is
+# installed locally.
 #
 # Extends the battle-tested default ruleset; entries below are repo-specific
-# allowlist carve-outs, NOT weakened rules. Never allowlist real credential
-# material — sealed stores and env files are already gitignored.
+# false-positive carve-outs, NOT weakened rules. Spec files are deliberately
+# NOT blanket-allowlisted — a real key pasted into a spec must still fail the
+# scan — so known-fake literals are exempted by EXACT VALUE instead. All seven
+# historical findings were triaged individually on 2026-07 before allowlisting.
+# Never allowlist real credential material; sealed stores and env files are
+# already gitignored.
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "OpenAlice repo-specific false-positive carve-outs"
+description = "OpenAlice repo-specific false-positive carve-outs (triaged)"
 paths = [
   # Lockfile integrity hashes trip generic high-entropy detectors.
   '''pnpm-lock\.yaml''',
-  # Spec fixtures use obviously-fake placeholder keys (sk-test…, PK…DEMO).
-  '''\.spec\.ts$''',
-  # Vendored/ported protocol reference material.
+  # Vendored/ported IBKR protocol reference material.
   '''packages/ibkr/ref/''',
 ]
 regexTarget = "match"
 regexes = [
-  # Documented placeholder shapes used in docs and default templates.
-  '''(?i)(your|placeholder|example|dummy|fake)[-_ ]?(api[-_ ]?key|token|secret)''',
+  # Documented placeholder shapes used in docs, specs, and default templates.
+  '''(?i)(your|placeholder|example|dummy|fake|test)[-_ ]?(api[-_ ]?key|token|secret)''',
+  # EastMoney's PUBLIC web-client token — a hardcoded constant of their public
+  # web API, present in every open-source EastMoney scraper. Not a credential.
+  '''D43BF722C8E33BDC906FB84D85E326E8''',
+  # Hardhat/Anvil's publicly documented dev private key #1 (spec fixture).
+  '''0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d''',
+]
+# Known-fake secret VALUES from specs (matched against the captured secret).
+stopwords = [
+  "live-api-key-1234",
+  "live-secret-5678",
+  "0xnotvalidkey",
+  "claude-3-5-sonnet",
 ]

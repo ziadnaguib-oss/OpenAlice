@@ -92,6 +92,12 @@ engineer + AI agents; parallel epics (C alongside B/D) shorten wall-clock.
 > mechanical reformat must stay an isolated commit); a11y/hook-deps/unused-var
 > findings surface as non-gating warnings pending burn-down; E-01 (`pnpm
 > doctor`) and E-02 (coverage ratchet) deferred as catalog enhancements.
+> QA follow-up (same day): lint toolchain exact-pinned; gitleaks moved to a
+> pinned CLI in CI (no org license needed) with an individually-triaged
+> exact-value allowlist replacing the blanket spec exemption (full 1,262-commit
+> history scan: clean; seeded-secret detection verified); hooks use
+> `npx --no-install`. Note: the 3-OS lint gate applies to platform-sensitive
+> PRs — ui/docs-only PRs gate on Ubuntu via the existing change-scope filter.
 
 **Objectives.** CI is 100% believable on all OSes; conventions are enforced by
 tools, not vigilance. (Roadmap: TE-1, DX-1, DX-2, SE-4, SE-5, TE-2.)

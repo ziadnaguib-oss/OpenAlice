@@ -135,7 +135,7 @@ describe('runHeadlessTask', () => {
   });
 
   it('streams the FULL stdout/stderr to log files (beyond the 16KB tails)', async () => {
-    const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+    const { mkdtemp, readFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const dir = await mkdtemp(join(tmpdir(), 'headless-log-'));

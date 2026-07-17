@@ -10,11 +10,13 @@ pre-commit:
   jobs:
     - name: lint
       glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
-      run: npx biome lint --no-errors-on-unmatched {staged_files}
+      # --no-install: use the locally installed biome or fail loudly — never
+      # let npx silently download an unpinned version from the registry.
+      run: npx --no-install biome lint --no-errors-on-unmatched {staged_files}
     - name: secret-scan
       run: node scripts/git-hooks/secret-scan.mjs
 
 pre-push:
   jobs:
     - name: typecheck
-      run: npx tsc --noEmit
+      run: npx --no-install tsc --noEmit

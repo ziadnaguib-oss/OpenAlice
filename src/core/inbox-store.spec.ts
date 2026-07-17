@@ -1,6 +1,6 @@
 import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mkdtemp, } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
