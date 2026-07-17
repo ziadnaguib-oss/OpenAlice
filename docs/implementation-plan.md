@@ -139,6 +139,12 @@ isolated so a revert doesn't drag logic changes.
 > (no new deps, no transport workers); `src/workspaces/logger.ts` retained —
 > zero-dep by documented design, same wire shape, unification deferred;
 > UTA (`services/`) console untouched (plan scopes `src/`).
+> QA follow-up (same day): invalid `OPENALICE_LOG_LEVEL` now degrades to
+> `info` with a warning instead of crashing boot; field serialization is a
+> single deep walk — Errors serialized at any depth (incl. an `any`-typed
+> Error smuggled as the whole fields arg, the fatal-handler bug), secrets
+> redacted at any depth (so the crash-bundle ring is clean by construction),
+> cycles guarded. All five QA findings spec-covered.
 
 **Objectives.** One structured logging spine (pino) across Alice; Prometheus
 metrics; crash bundles; kill the `WireShape` duplication. (DX-3, IN-1, IN-2,

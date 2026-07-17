@@ -83,19 +83,26 @@ const destination = {
   },
 }
 
+const VALID_LEVELS = new Set(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
+
+/** An invalid level env must degrade to 'info', never brick boot — pino
+ *  throws at construction on unknown levels, and this module is imported by
+ *  config.ts, so a typo would take down BOTH Alice and UTA. */
+function resolveLevel(): string {
+  const raw = (process.env['OPENALICE_LOG_LEVEL'] ?? 'info').toLowerCase()
+  if (VALID_LEVELS.has(raw)) return raw
+  process.stderr.write(
+    `{"level":"warn","ts":"${new Date().toISOString()}","scope":"logger","msg":"invalid OPENALICE_LOG_LEVEL '${raw}' — falling back to 'info'"}\n`,
+  )
+  return 'info'
+}
+
 const root = pino(
   {
-    level: process.env['OPENALICE_LOG_LEVEL'] ?? 'info',
+    level: resolveLevel(),
     base: undefined,
     timestamp: () => `,"ts":"${new Date().toISOString()}"`,
     formatters: { level: (label) => ({ level: label }) },
-    redact: {
-      paths: [
-        'apiKey', '*.apiKey', 'token', '*.token', 'secret', '*.secret',
-        'password', '*.password', 'authorization', '*.authorization',
-      ],
-      censor: '[redacted]',
-    },
   },
   destination,
 )
@@ -108,13 +115,40 @@ export interface Logger {
   child(bindings: Record<string, unknown>): Logger
 }
 
+/**
+ * One deep walk over the fields: serialize Errors (their message/stack are
+ * non-enumerable and would otherwise vanish), redact secret-shaped string
+ * values at ANY depth (pino's `redact` paths only reach declared depths —
+ * see the M1 QA review), and guard against cycles. Runs before pino so the
+ * ring buffer (exported by the crash bundle) only ever holds clean lines.
+ */
+function prepareValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (value instanceof Error) {
+    return { name: value.name, message: value.message, stack: value.stack }
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return '[circular]'
+    seen.add(value)
+    return value.map((v) => prepareValue(v, seen))
+  }
+  if (value !== null && typeof value === 'object') {
+    if (seen.has(value)) return '[circular]'
+    seen.add(value)
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = SECRET_KEY_RE.test(k) && typeof v === 'string' ? '[redacted]' : prepareValue(v, seen)
+    }
+    return out
+  }
+  return value
+}
+
 function serializeFields(fields?: Record<string, unknown>): Record<string, unknown> {
   if (!fields) return {}
-  const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(fields)) {
-    out[k] = v instanceof Error ? { name: v.name, message: v.message, stack: v.stack } : v
-  }
-  return out
+  // `any`-typed call sites can smuggle a bare Error in as the whole fields
+  // arg (tsc can't catch it) — the fatal-handler bug from the M1 QA review.
+  if (fields instanceof Error) return { err: prepareValue(fields, new WeakSet()) as Record<string, unknown> }
+  return prepareValue(fields, new WeakSet()) as Record<string, unknown>
 }
 
 function wrap(p: PinoLogger): Logger {

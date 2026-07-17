@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
+import { logger } from '../../core/logger.js'
 import type { EngineContext } from '../../core/types.js'
 import type { WorkspaceService } from '../../workspaces/service.js'
 import { createMetricsRoutes, createDebugBundleRoutes } from './metrics.js'
@@ -76,5 +77,16 @@ describe('/api/debug/bundle', () => {
   it('is a 404 when metrics are disabled', async () => {
     const app = createDebugBundleRoutes(fakeCtx({ metricsEnabled: false }))
     expect((await app.request('/bundle')).status).toBe(404)
+  })
+
+  it('recentLogs in the bundle never contain secret material logged at any depth', async () => {
+    // Log through the real singleton so the line lands in the real ring the
+    // bundle exports — redaction must happen at write time, not export time.
+    logger.info('spec-secret-probe', { deep: { nested: { apiKey: 'BUNDLE-LEAK-CANARY' } } })
+    const app = createDebugBundleRoutes(fakeCtx())
+    const bundle = await (await app.request('/bundle')).json()
+    const logs = (bundle.recentLogs as string[]).join('')
+    expect(logs).toContain('spec-secret-probe') // the line itself is present
+    expect(logs).not.toContain('BUNDLE-LEAK-CANARY')
   })
 })

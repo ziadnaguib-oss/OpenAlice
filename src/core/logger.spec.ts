@@ -89,6 +89,42 @@ describe('core logger', () => {
     expect(line).toContain('[redacted]')
   })
 
+  it('falls back to info (with a warning) on an invalid OPENALICE_LOG_LEVEL instead of crashing boot', async () => {
+    const { logger } = await freshLogger({ OPENALICE_LOG_LEVEL: 'verbose' })
+    // Module import itself not throwing IS the assertion for H-1; then prove
+    // the fallback level actually logs.
+    logger.info('still alive')
+    expect(out.join('')).toContain('still alive')
+    expect(err.join('')).toContain("invalid OPENALICE_LOG_LEVEL 'verbose'")
+  })
+
+  it('redacts secret-shaped values at ANY nesting depth (and the ring stays clean)', async () => {
+    const { logger, getRecentLogs } = await freshLogger()
+    logger.info('cfg', { cfg: { trading: { nested: { apiKey: 'DEEP-SECRET-XYZ' } } } })
+    const line = out.at(-1) ?? ''
+    expect(line).not.toContain('DEEP-SECRET-XYZ')
+    expect(line).toContain('[redacted]')
+    expect(getRecentLogs().join('')).not.toContain('DEEP-SECRET-XYZ')
+  })
+
+  it('survives an Error smuggled in as the whole fields arg (any-typed call sites)', async () => {
+    const { logger } = await freshLogger()
+    logger.error('fatal', new Error('the-real-cause') as unknown as Record<string, unknown>)
+    const rec = JSON.parse(err.at(-1) ?? '{}')
+    expect(rec.err.message).toBe('the-real-cause')
+    expect(typeof rec.err.stack).toBe('string')
+  })
+
+  it('guards against cyclic field objects', async () => {
+    const { logger } = await freshLogger()
+    const a: Record<string, unknown> = { name: 'a' }
+    a['self'] = a
+    logger.info('cycle', { a })
+    const rec = JSON.parse(out.at(-1) ?? '{}')
+    expect(rec.a.name).toBe('a')
+    expect(rec.a.self).toBe('[circular]')
+  })
+
   it('keeps a bounded ring of recent lines for the crash bundle', async () => {
     const { logger, getRecentLogs } = await freshLogger()
     for (let i = 0; i < 510; i++) logger.info(`line-${i}`)

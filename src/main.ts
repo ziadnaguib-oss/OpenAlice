@@ -458,6 +458,6 @@ function positiveInteger(raw: string | undefined): number | undefined {
 }
 
 start().catch((err) => {
-  log.error('fatal:', err)
+  log.error('fatal', { err })
   process.exit(1)
 })
