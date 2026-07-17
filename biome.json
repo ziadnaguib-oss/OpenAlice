@@ -77,5 +77,23 @@
 				"noUnusedFunctionParameters": "off"
 			}
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": [
+				"src/**",
+				"!src/**/*.spec.ts",
+				"!src/spec-helpers/**",
+				"!src/workspaces/templates/**",
+				"!src/workspaces/cli/**"
+			],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noConsole": "error"
+					}
+				}
+			}
+		}
+	]
 }

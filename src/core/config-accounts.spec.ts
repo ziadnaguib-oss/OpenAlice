@@ -82,10 +82,12 @@ describe('UTA accounts at-rest sealing', () => {
     await config.writeUTAsConfig([ACCOUNT] as never)
     await rm(join(home, 'sealing.key')) // simulate data/ copied to a machine without the key
 
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The structured logger routes error records to stderr (M1).
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     try {
       expect(await config.readUTAsConfig()).toEqual([])
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('could not be unsealed'))
+      const stderrOut = errSpy.mock.calls.map((c) => String(c[0])).join('')
+      expect(stderrOut).toContain('could not be unsealed')
     } finally {
       errSpy.mockRestore()
     }

@@ -125,7 +125,20 @@ isolated so a revert doesn't drag logic changes.
 
 ---
 
-### M1 — Structured Logging & Observability *(Epic A · 1.5w · depends: M0)*
+### M1 — Structured Logging & Observability *(Epic A · 1.5w · depends: M0)* ✅ IMPLEMENTED 2026-07-13
+
+> **Status:** shipped. pino spine at `src/core/logger.ts` emitting the
+> launcher logger's exact wire shape (`{ts, level, msg}` + stderr routing);
+> all 64 `console.*` sites across 21 `src/` files migrated; `noConsole`
+> lint-enforced (specs/templates/CLI-shims/guardian allowlisted — templates
+> and shims are standalone workspace-side scripts where console IS the
+> output). `/api/metrics` Prometheus text + `/api/debug/bundle` crash export
+> behind `metrics.json` (seeded default true). WireShape single-source was
+> pre-completed in the stabilization commit. Deviations: pretty output is a
+> built-in `OPENALICE_LOG_PRETTY=1` renderer instead of a pino-pretty dep
+> (no new deps, no transport workers); `src/workspaces/logger.ts` retained —
+> zero-dep by documented design, same wire shape, unification deferred;
+> UTA (`services/`) console untouched (plan scopes `src/`).
 
 **Objectives.** One structured logging spine (pino) across Alice; Prometheus
 metrics; crash bundles; kill the `WireShape` duplication. (DX-3, IN-1, IN-2,

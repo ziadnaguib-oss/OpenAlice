@@ -8,6 +8,9 @@
 import { fetchAndParseFeed } from './rss-parser.js'
 import { computeDedupKey, type NewsCollectorStore } from '../store.js'
 import type { RSSFeedConfig } from '../types.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'rss' })
 
 export interface CollectorOpts {
   store: NewsCollectorStore
@@ -36,11 +39,11 @@ export class NewsCollector {
   /** Start periodic collection. Fetches immediately, then at interval. */
   start(): void {
     this.fetchAll().catch((err) =>
-      console.warn(`news-collector: initial fetch failed: ${err instanceof Error ? err.message : err}`),
+      log.warn(`news-collector: initial fetch failed: ${err instanceof Error ? err.message : err}`),
     )
     this.timer = setInterval(
       () => this.fetchAll().catch((err) =>
-        console.warn(`news-collector: periodic fetch failed: ${err instanceof Error ? err.message : err}`),
+        log.warn(`news-collector: periodic fetch failed: ${err instanceof Error ? err.message : err}`),
       ),
       this.intervalMs,
     )
@@ -81,14 +84,14 @@ export class NewsCollector {
         totalItems += fetched
         totalNew += ingested
       } catch (err) {
-        console.warn(
+        log.warn(
           `news-collector: failed to fetch ${feed.name} (${feed.url}): ${err instanceof Error ? err.message : err}`,
         )
       }
     }
 
     if (totalNew > 0) {
-      console.log(
+      log.info(
         `news-collector: fetched ${totalItems} items from ${activeFeeds.length} active feeds, ${totalNew} new`,
       )
     }

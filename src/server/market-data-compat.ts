@@ -13,6 +13,9 @@ import {
   createRegistry,
   type QueryExecutor,
 } from '@traderalice/opentypebb'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'market-data-compat' })
 
 export interface DefaultProviders {
   /** Also used for etf/index/derivatives, matching main.ts client construction. */
@@ -88,7 +91,7 @@ export function mountMarketDataCompat(
   const widgetsJson = buildWidgetsJson(rootRouter, registry)
   app.get(`${opts.basePath}/widgets.json`, (c) => c.json(widgetsJson))
 
-  console.log(
+  log.info(
     `[market-data-compat] mounted on ${opts.basePath} (${Object.keys(widgetsJson).length} entries)`,
   )
 }

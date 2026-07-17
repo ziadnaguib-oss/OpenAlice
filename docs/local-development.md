@@ -61,6 +61,12 @@ automatically in Claude Code on the web sessions.
 | `AQ_LAUNCHER_ROOT` | Move only the Workspace launcher root. |
 | `OPENALICE_GLOBAL_DIR` | Move the user-global `provider-keys.json` store. |
 | `ELECTRON_SKIP_BINARY_DOWNLOAD=1` | Skip the Electron binary at install time. |
+| `OPENALICE_LOG_LEVEL` | Alice log threshold: `debug` \| `info` (default) \| `warn` \| `error`. |
+| `OPENALICE_LOG_PRETTY=1` | Human-oriented log lines instead of JSON (dev convenience). |
+
+Observability: `GET /api/metrics` (Prometheus text) and `GET /api/debug/bundle`
+(crash bundle: versions, redacted config shape, recent log ring) ride the
+authenticated web port; disable both with `metrics.json → {"enabled": false}`.
 
 ## Agent CLI Authentication
 

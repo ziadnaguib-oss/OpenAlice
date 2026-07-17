@@ -151,5 +151,7 @@ the tagline, pillars, or other marketing copy.
 - Strict TypeScript, ES2023 target.
 - Zod for config schemas; TypeBox for tool parameter schemas.
 - `decimal.js` for financial arithmetic.
-- Prefer structured Workspace launcher logs; the main process currently uses
-  `console` and does not have a universal pino sink.
+- Structured logs everywhere in `src/`: use `logger.child({ scope })` from
+  `src/core/logger.ts` (pino; `console.*` is lint-banned outside specs,
+  templates, and CLI shims). `OPENALICE_LOG_LEVEL` / `OPENALICE_LOG_PRETTY=1`
+  tune output.

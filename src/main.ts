@@ -62,6 +62,9 @@ import { issueToolFactories } from './tool/issue-tools.js'
 import { createToolCallLog } from './core/tool-call-log.js'
 import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'boot' })
 
 // ==================== Persistence paths ====================
 
@@ -135,13 +138,13 @@ async function main() {
   const utaUrl = resolveUTAUrl()
   const utaClient = createUTAClient({ baseUrl: utaUrl })
   if (utaDisabled) {
-    console.warn('uta: disabled by trading mode lite — continuing without trading carrier')
+    log.warn('uta: disabled by trading mode lite — continuing without trading carrier')
   } else {
     const utaHealth = await waitForUTAReady({ baseUrl: utaUrl, timeoutMs: 750 })
     if (utaHealth) {
-      console.log(`uta: ready (${utaHealth.utas} accounts, startedAt=${utaHealth.startedAt})`)
+      log.info(`uta: ready (${utaHealth.utas} accounts, startedAt=${utaHealth.startedAt})`)
     } else {
-      console.warn(`uta: unavailable at ${utaUrl} — continuing in lite mode`)
+      log.warn(`uta: unavailable at ${utaUrl} — continuing in lite mode`)
     }
   }
   const utaManager = new UTAManagerSDK({
@@ -275,7 +278,7 @@ async function main() {
   }
   toolCenter.register(createEconomyTools(economyClient, commodityClient), 'economy')
 
-  console.log(`tool-center: ${toolCenter.list().length} tools registered`)
+  log.info(`tool-center: ${toolCenter.list().length} tools registered`)
 
   // ==================== Inbox store ====================
 
@@ -308,7 +311,7 @@ async function main() {
     })
     newsCollector.start()
     const activeCount = config.news.feeds.filter((f) => f.enabled !== false).length
-    console.log(`news-collector: started (${activeCount}/${config.news.feeds.length} feeds active, every ${config.news.intervalMinutes}m)`)
+    log.info(`news-collector: started (${activeCount}/${config.news.feeds.length} feeds active, every ${config.news.intervalMinutes}m)`)
   }
 
   // ==================== Plugins ====================
@@ -391,10 +394,10 @@ async function main() {
 
   for (const plugin of [...corePlugins, ...optionalPlugins.values()]) {
     await plugin.start(ctx)
-    console.log(`plugin started: ${plugin.name}`)
+    log.info(`plugin started: ${plugin.name}`)
   }
 
-  console.log('engine: started')
+  log.info('engine: started')
 
   // Broker catalog refresh, snapshot scheduling, and broker close-on-
   // shutdown all live in the UTA service after Step 6.
@@ -434,7 +437,7 @@ async function start(): Promise<void> {
     ...(guardianPid ? { guardianPid } : {}),
     ...(guardianStartedAt ? { guardianStartedAt } : {}),
     onOwnershipLost: (err) => {
-      console.error('fatal: OpenAlice runtime ownership lost:', err)
+      log.error('fatal: OpenAlice runtime ownership lost', { err })
       try { process.kill(process.pid, 'SIGTERM') } catch { process.exit(1) }
     },
   })
@@ -442,7 +445,7 @@ async function start(): Promise<void> {
     await main()
   } catch (err) {
     await releaseRuntimeLock().catch((releaseErr) => {
-      console.error('runtime lock release failed after startup error:', releaseErr)
+      log.error('runtime lock release failed after startup error:', releaseErr)
     })
     throw err
   }
@@ -455,6 +458,6 @@ function positiveInteger(raw: string | undefined): number | undefined {
 }
 
 start().catch((err) => {
-  console.error('fatal:', err)
+  log.error('fatal:', err)
   process.exit(1)
 })

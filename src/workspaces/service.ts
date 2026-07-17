@@ -78,8 +78,9 @@ import {
   type ChatWorkspaceResolution,
 } from './chat-workspace-resolver.js';
 
-/** Max concurrent in-flight headless tasks — backstop against unbounded spawn. */
-const MAX_CONCURRENT_HEADLESS = 8;
+/** Max concurrent in-flight headless tasks — backstop against unbounded spawn.
+ *  Exported for the /api/metrics capacity gauge. */
+export const MAX_CONCURRENT_HEADLESS = 8;
 
 /** Thrown by `dispatchHeadlessTask` when the concurrency cap is hit (→ HTTP 429). */
 export class HeadlessCapacityError extends Error {

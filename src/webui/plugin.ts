@@ -33,6 +33,10 @@ import { mountMarketDataCompat } from '../server/market-data-compat.js'
 import { buildSDKCredentials } from '../domain/market-data/credential-map.js'
 import { resolveUTAUrl } from '../services/uta-supervisor/url.js'
 import { createWorkspaceService, type WorkspaceService } from '../workspaces/service.js'
+import { logger } from '../core/logger.js'
+import { createMetricsRoutes, createDebugBundleRoutes } from './routes/metrics.js'
+
+const log = logger.child({ scope: 'webui' })
 
 /** Cross-plugin hand-off for WorkspaceService. WebPlugin creates it
  *  inside `start()`; McpPlugin needs it earlier for the `/mcp/:wsId`
@@ -99,15 +103,20 @@ export class WebPlugin implements Plugin {
     const { bootstrapToken, getTokenInfo } = await import('@/services/auth/index.js')
     await bootstrapToken({
       onFirstGeneration: (token) => {
-        console.log('')
-        console.log('═══════════════════════════════════════════════════════════════')
-        console.log('  First-run admin token (save this — won\'t be shown again):')
-        console.log('')
-        console.log(`      ${token}`)
-        console.log('')
-        console.log('  To rotate: delete data/config/auth.json and restart.')
-        console.log('═══════════════════════════════════════════════════════════════')
-        console.log('')
+        // User-facing banner, not a log record — raw stdout keeps the
+        // formatting intact (the structured logger would JSON-wrap each line).
+        process.stdout.write([
+          '',
+          '═══════════════════════════════════════════════════════════════',
+          '  First-run admin token (save this — won\'t be shown again):',
+          '',
+          `      ${token}`,
+          '',
+          '  To rotate: delete data/config/auth.json and restart.',
+          '═══════════════════════════════════════════════════════════════',
+          '',
+          '',
+        ].join('\n'))
       },
     })
 
@@ -162,7 +171,7 @@ export class WebPlugin implements Plugin {
       if (err instanceof SyntaxError) {
         return c.json({ error: 'Invalid JSON' }, 400)
       }
-      console.error('web: unhandled error:', err)
+      log.error('web: unhandled error', { err })
       return c.json({ error: err.message }, 500)
     })
 
@@ -237,6 +246,8 @@ export class WebPlugin implements Plugin {
     app.route('/api/persona', createPersonaRoutes())
     app.route('/api/inbox', createInboxRoutes({ inboxStore: ctx.inboxStore }))
     app.route('/api/version', createVersionRoutes())
+    app.route('/api/metrics', createMetricsRoutes(ctx, () => this.workspaceService))
+    app.route('/api/debug', createDebugBundleRoutes(ctx))
 
     // ==================== Workspaces (launcher-style PTY) ====================
     // Self-contained subsystem ported from auto-quant-launcher. Owns its own
@@ -311,11 +322,11 @@ export class WebPlugin implements Plugin {
         server.listen(this.config.cliSocketPath)
       })
       this.cliSocketServer = server
-      console.log(`local tool gateway listening on ${this.config.cliSocketPath}`)
+      log.info(`local tool gateway listening on ${this.config.cliSocketPath}`)
     }
 
     if (this.config.listen === false) {
-      console.log('web plugin listening over Electron IPC')
+      log.info('web plugin listening over Electron IPC')
       return
     }
 
@@ -325,7 +336,7 @@ export class WebPlugin implements Plugin {
     // above + the auth middleware on every route).
     const hostname = (process.env['OPENALICE_BIND_HOST'] ?? '127.0.0.1').trim()
     this.server = serve({ fetch: app.fetch, port: this.config.port, hostname }, (info: { port: number }) => {
-      console.log(`web plugin listening on http://${hostname}:${info.port}`)
+      log.info(`web plugin listening on http://${hostname}:${info.port}`)
     })
 
     // Attach WS upgrade handler for /api/workspaces/pty onto the same http.Server.

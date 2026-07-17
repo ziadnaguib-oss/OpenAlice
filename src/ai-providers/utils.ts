@@ -1,3 +1,6 @@
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'ai-providers' })
 /**
  * Shared utilities used across AI providers and AgentCenter.
  */
@@ -66,5 +69,5 @@ export const DEFAULT_MAX_HISTORY = 50
 /** Log a tool call with a short input preview. */
 export function logToolCall(name: string, input: unknown) {
   const preview = JSON.stringify(input).slice(0, 120)
-  console.log(`  ↳ ${name}(${preview})`)
+  log.info(`  ↳ ${name}(${preview})`)
 }

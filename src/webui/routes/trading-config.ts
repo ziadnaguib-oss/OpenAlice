@@ -13,6 +13,9 @@ import {
 import { triggerUTARestart } from '../../services/uta-supervisor/restart-trigger.js'
 import { resolveUTAUrl } from '../../services/uta-supervisor/url.js'
 import { describeTradingMode } from '../../services/trading-mode.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'trading-config' })
 
 /** Fire-and-forget UTA restart after a config mutation. Logs but doesn't
  *  block the HTTP response — UI returns immediately and Guardian flips
@@ -21,11 +24,11 @@ import { describeTradingMode } from '../../services/trading-mode.js'
 function notifyUTAReload(): void {
   triggerUTARestart()
     .then((r) => {
-      if (!r.triggered) console.warn('[trading-config] UTA restart skipped:', r.error)
-      else if (!r.ready) console.warn('[trading-config] UTA did not come back:', r.error)
+      if (!r.triggered) log.warn('[trading-config] UTA restart skipped', { error: r.error })
+      else if (!r.ready) log.warn('[trading-config] UTA did not come back', { error: r.error })
     })
     .catch((err) => {
-      console.warn('[trading-config] UTA restart failed:', err instanceof Error ? err.message : err)
+      log.warn('[trading-config] UTA restart failed:', err instanceof Error ? err.message : err)
     })
 }
 

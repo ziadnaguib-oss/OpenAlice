@@ -36,6 +36,9 @@ import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { stringify as stringifyYaml } from 'yaml'
 import type { Migration } from '../types.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'migrations' })
 
 /** Mirror of the launcher-root resolution in `src/workspaces/config.ts`. Inlined
  *  (not imported) to keep this migration frozen against that module's evolution. */
@@ -174,7 +177,7 @@ export async function migrateWorkspaceIssues(
       } catch {
         // Unparseable legacy file: leave it in place (don't destroy data we can't
         // read) — the reader's loud hint guides a manual fix.
-        console.log(`[migration 0010] ${legacyPath} is not valid JSON — left in place for manual migration`)
+        log.info(`[migration 0010] ${legacyPath} is not valid JSON — left in place for manual migration`)
         continue
       }
 
@@ -194,11 +197,11 @@ export async function migrateWorkspaceIssues(
       await unlink(legacyPath).catch(() => {})
       converted += wsConverted
       touched++
-      console.log(
+      log.info(
         `[migration 0010] ${dir}: converted ${wsConverted} issue(s) from .alice/${legacyPath.endsWith('issue.json') ? 'issue.json' : 'schedule.json'} → .alice/issues/`,
       )
     } catch (err) {
-      console.log(`[migration 0010] skipped ${dir}: ${err instanceof Error ? err.message : String(err)}`)
+      log.info(`[migration 0010] skipped ${dir}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
   return { converted, workspaces: touched }

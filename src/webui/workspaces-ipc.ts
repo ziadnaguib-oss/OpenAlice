@@ -13,6 +13,9 @@ import type { WebSocket } from 'ws'
 
 import { logger as launcherLogger } from '../workspaces/logger.js'
 import type { WorkspaceService } from '../workspaces/service.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'webui' })
 
 const MSG_CONNECT = 'openalice:pty:connect'
 const MSG_CLIENT = 'openalice:pty:client-message'
@@ -128,7 +131,7 @@ export function attachWorkspacesIpc(svc: WorkspaceService): AttachedWorkspaceIpc
       )
       if (!result.ok && result.reason === 'missing') socket.close(4404, 'session not found')
       launcherLogger.event('ipc_pty.attached', { connectionId, sessionId, cols, rows })
-      console.log(`ipc pty attached: session=${sessionId} connection=${connectionId} size=${cols}x${rows}`)
+      log.info(`ipc pty attached: session=${sessionId} connection=${connectionId} size=${cols}x${rows}`)
       return
     }
 
