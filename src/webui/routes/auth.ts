@@ -14,11 +14,14 @@ import { setCookie, deleteCookie } from 'hono/cookie'
 import { z } from 'zod'
 import {
   verifyToken,
+  verifyApiToken,
   createSession,
   revokeSession,
   validateAndTouch,
   getTokenInfo,
+  type AuthRateLimiter,
 } from '@/services/auth/index.js'
+import { appendAudit } from '@/core/audit-chain.js'
 import {
   SESSION_COOKIE_NAME,
   isLoopbackIp,
@@ -43,6 +46,9 @@ export interface AuthRouteOptions {
    *  (login appears broken). Same list as the middleware's
    *  `trustedProxies`. */
   trustedProxies?: string[]
+  /** Shared auth-failure limiter (SE-1) — same instance the middleware
+   *  holds, so bearer failures and login failures share one budget. */
+  limiter?: AuthRateLimiter
 }
 
 export function createAuthRoutes(opts: AuthRouteOptions = {}) {
@@ -94,23 +100,43 @@ export function createAuthRoutes(opts: AuthRouteOptions = {}) {
    * "token configured vs not" via timing or content.
    */
   app.post('/login', async (c) => {
+    const fromTrustedProxy = isTrustedProxyPeer(c, trustedProxies)
+    const limiterIp = normalizeIp(getSocketRemoteAddress(c) ?? 'unknown')
+
+    // Lockout gate (SE-1) BEFORE reading the body — a locked-out source
+    // gets 429 without burning a scrypt verification.
+    if (opts.limiter?.isLocked(limiterIp)) {
+      return c.json({ error: 'Too many failed attempts', code: 'RATE_LIMITED' }, 429)
+    }
+
     const body = await c.req.json().catch(() => null)
     const parsed = loginSchema.safeParse(body)
     if (!parsed.success) {
       return c.json({ error: 'Invalid request' }, 400)
     }
 
-    const ok = await verifyToken(parsed.data.token)
-    if (!ok) {
+    // Admin token → admin session. Scoped API token (`oat_…`) → session
+    // inheriting that token's scopes (the mobile read-only path).
+    let scopes: import('@/services/auth/scopes.js').TokenScope[] | null = null
+    if (parsed.data.token.startsWith('oat_')) {
+      const tok = await verifyApiToken(parsed.data.token)
+      if (tok) scopes = tok.scopes
+    } else if (await verifyToken(parsed.data.token)) {
+      scopes = ['admin']
+    }
+    if (!scopes) {
       // Don't reveal whether the token was malformed vs wrong vs no auth
       // configured. Constant-ish behavior.
+      if (opts.limiter?.recordFailure(limiterIp)) {
+        void appendAudit({ actor: 'system', action: 'auth.lockout', details: { ip: limiterIp, via: 'login' } })
+      }
       return c.json({ error: 'Invalid token' }, 401)
     }
+    opts.limiter?.recordSuccess(limiterIp)
 
-    const fromTrustedProxy = isTrustedProxyPeer(c, trustedProxies)
     const userAgent = c.req.header('user-agent') ?? undefined
     const ip = readClientIp(c, fromTrustedProxy) ?? undefined
-    const session = await createSession({ userAgent, ip })
+    const session = await createSession({ userAgent, ip, scopes })
 
     const secure = opts.forceSecureCookie ?? (fromTrustedProxy && isForwardedHttps(c))
     setCookie(c, SESSION_COOKIE_NAME, session.sid, {

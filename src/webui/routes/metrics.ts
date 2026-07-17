@@ -14,6 +14,7 @@
 import { Hono } from 'hono'
 
 import type { EngineContext } from '../../core/types.js'
+import { readAuditTail, verifyAuditChain } from '../../core/audit-chain.js'
 import { getRecentLogs, redactSecrets } from '../../core/logger.js'
 import { getCurrentVersion } from '../../core/version.js'
 import { waitForUTAReady } from '../../services/uta-supervisor/health.js'
@@ -152,6 +153,16 @@ export function createDebugBundleRoutes(ctx: EngineContext): Hono {
     }
     c.header('content-disposition', `attachment; filename="openalice-bundle-${Date.now()}.json"`)
     return c.json(bundle)
+  })
+
+  // GET /api/debug/audit → chain verification + newest records (SE-3).
+  app.get('/audit', async (c) => {
+    if (ctx.config.metrics.enabled === false) return c.notFound()
+    const limit = Number(c.req.query('limit') ?? 100)
+    return c.json({
+      verify: await verifyAuditChain(),
+      tail: await readAuditTail(Number.isFinite(limit) ? limit : 100),
+    })
   })
 
   return app

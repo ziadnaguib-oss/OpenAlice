@@ -391,6 +391,17 @@ export const metricsSchema = z.object({
   enabled: z.boolean().default(true),
 })
 
+export const securitySchema = z.object({
+  /** Auth-failure rate limiting (SE-1). `enabled: false` is the one-line
+   *  rollback to pre-M2 behavior. */
+  authRateLimit: z.object({
+    enabled: z.boolean().default(true),
+    maxFailures: z.number().int().positive().default(20),
+    windowMinutes: z.number().int().positive().default(15),
+    lockoutMinutes: z.number().int().positive().default(15),
+  }).default({ enabled: true, maxFailures: 20, windowMinutes: 15, lockoutMinutes: 15 }),
+})
+
 export const webSubchannelSchema = z.object({
   /** URL-safe identifier. Used as session path segment: data/sessions/web/{id}.jsonl */
   id: z.string().regex(/^[a-z0-9-_]+$/, 'id must be lowercase alphanumeric with hyphens/underscores'),
@@ -479,6 +490,7 @@ export type Config = {
   news: z.infer<typeof newsCollectorSchema>
   tools: z.infer<typeof toolsSchema>
   metrics: z.infer<typeof metricsSchema>
+  security: z.infer<typeof securitySchema>
 }
 
 // ==================== Loader ====================
@@ -516,7 +528,7 @@ export async function loadConfig(): Promise<Config> {
   // is pending. See src/migrations/INDEX.md for the full list.
   await runMigrations()
 
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'snapshot.json', 'mcp.json', 'connectors.json', 'news.json', 'tools.json', 'trading.json', 'metrics.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'snapshot.json', 'mcp.json', 'connectors.json', 'news.json', 'tools.json', 'trading.json', 'metrics.json', 'security.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   const config: Config = {
@@ -534,6 +546,7 @@ export async function loadConfig(): Promise<Config> {
     tools:         await parseAndSeed(files[11], toolsSchema, raws[11]),
     trading:       await parseAndSeed(files[12], tradingSchema, raws[12]),
     metrics:       await parseAndSeed(files[13], metricsSchema, raws[13]),
+    security:      await parseAndSeed(files[14], securitySchema, raws[14]),
   }
 
   // Spawn-time-fixed channel: when guardian (Electron main) spawns the
@@ -1030,6 +1043,7 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   news: newsCollectorSchema,
   tools: toolsSchema,
   metrics: metricsSchema,
+  security: securitySchema,
 }
 
 const sectionFiles: Record<ConfigSection, string> = {
@@ -1047,6 +1061,7 @@ const sectionFiles: Record<ConfigSection, string> = {
   news: 'news.json',
   tools: 'tools.json',
   metrics: 'metrics.json',
+  security: 'security.json',
 }
 
 /** All valid config section names (derived from sectionSchemas). */

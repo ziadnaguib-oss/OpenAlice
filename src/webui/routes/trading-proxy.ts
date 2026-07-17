@@ -13,7 +13,14 @@
  */
 
 import { Hono } from 'hono'
+import { appendAudit } from '@/core/audit-chain.js'
 import { describeTradingMode, type TradingModePolicy } from '../../services/trading-mode.js'
+import type { AuthContext } from '../middleware/auth.js'
+
+/** Wallet-gate operations that must land in the audit chain (SE-3):
+ *  commit (approve), reject, push. Staging is agent-side noise; the gate
+ *  decisions are the accountable acts. */
+const AUDITED_TRADING_RE = /^\/api\/trading\/uta\/([^/]+)\/wallet\/(commit|reject|push)$/
 
 // Total request timeout. UTA is on the loopback interface so connect is
 // instant — this guards against handlers that legitimately take seconds
@@ -177,6 +184,21 @@ export function createTradingProxyRoutes(opts: {
       }, 502)
     } finally {
       clearTimeout(connectTimer)
+    }
+
+    // Audit gate decisions (SE-3) — only successful commit/reject/push.
+    // Failures are visible in logs; the chain records what actually took
+    // effect on the account.
+    if (c.req.method === 'POST' && upstream.ok) {
+      const m = AUDITED_TRADING_RE.exec(c.req.path)
+      if (m) {
+        const auth = (c.get as (key: string) => unknown)('auth') as AuthContext | undefined
+        await appendAudit({
+          actor: auth?.actor ?? 'unknown',
+          action: `trading.${m[2]}`,
+          details: { utaId: m[1], status: upstream.status },
+        })
+      }
     }
 
     // Re-wrap with a fresh Headers object so downstream middleware (CORS,

@@ -20,9 +20,80 @@
  */
 
 import type { Context, MiddlewareHandler } from 'hono'
-import { validateAndTouch } from '@/services/auth/index.js'
+import { validateAndTouch, verifyApiToken, verifyToken } from '@/services/auth/index.js'
+import { scopesSatisfy, type TokenScope } from '@/services/auth/scopes.js'
+import type { AuthRateLimiter } from '@/services/auth/rate-limit.js'
+import { appendAudit } from '@/core/audit-chain.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'auth' })
 
 export const SESSION_COOKIE_NAME = 'alice_session'
+
+/** Auth identity attached to the request context (`c.get('auth')`). */
+export interface AuthContext {
+  /** 'loopback' | 'session:<sid8>' | 'token:<id>' */
+  actor: string
+  scopes: readonly TokenScope[]
+}
+
+/**
+ * Scope requirements per /api route group (M2 / SE-2). `read` guards
+ * GET/HEAD, `write` guards mutating methods. Longest prefix wins. Any
+ * /api path NOT matched here falls back to admin/admin — new routes are
+ * locked down until someone consciously classifies them, and the
+ * route-coverage spec fails when a mounted prefix is missing from this
+ * table.
+ */
+export const ROUTE_SCOPES: ReadonlyArray<{
+  prefix: string
+  read: TokenScope
+  write: TokenScope
+}> = [
+  // Observation surfaces — safe for read-only tokens.
+  { prefix: '/api/metrics', read: 'read', write: 'admin' },
+  { prefix: '/api/inbox', read: 'read', write: 'admin' },
+  { prefix: '/api/entities', read: 'read', write: 'admin' },
+  { prefix: '/api/wikilink', read: 'read', write: 'admin' },
+  { prefix: '/api/market-data-v1', read: 'read', write: 'admin' },
+  { prefix: '/api/market-data', read: 'read', write: 'admin' },
+  { prefix: '/api/market', read: 'read', write: 'admin' },
+  { prefix: '/api/bars', read: 'read', write: 'admin' },
+  { prefix: '/api/reference', read: 'read', write: 'admin' },
+  { prefix: '/api/news', read: 'read', write: 'admin' },
+  { prefix: '/api/media', read: 'read', write: 'admin' },
+  { prefix: '/api/agent-status', read: 'read', write: 'admin' },
+  { prefix: '/api/tools', read: 'read', write: 'admin' }, // POST = tool EXECUTION
+  // Work creation — the Bridge (M8) holds 'enqueue'.
+  { prefix: '/api/issues', read: 'read', write: 'enqueue' },
+  { prefix: '/api/schedule', read: 'read', write: 'enqueue' },
+  { prefix: '/api/headless', read: 'read', write: 'enqueue' },
+  // Trading: config carries broker credentials → admin both ways; the
+  // trading plane itself is observable with 'read', mutable only with the
+  // approval scope (stage/commit/reject/push all ride POST).
+  { prefix: '/api/trading/config', read: 'admin', write: 'admin' },
+  { prefix: '/api/trading', read: 'read', write: 'gate:approve' },
+  { prefix: '/api/simulator', read: 'admin', write: 'admin' },
+  // Full-control surfaces.
+  { prefix: '/api/workspaces', read: 'admin', write: 'admin' },
+  { prefix: '/api/config', read: 'admin', write: 'admin' },
+  { prefix: '/api/preferences', read: 'admin', write: 'admin' },
+  { prefix: '/api/persona', read: 'admin', write: 'admin' },
+  { prefix: '/api/channels', read: 'admin', write: 'admin' },
+  { prefix: '/api/agent-runtimes', read: 'admin', write: 'admin' },
+  { prefix: '/api/tokens', read: 'admin', write: 'admin' },
+  { prefix: '/api/debug', read: 'admin', write: 'admin' },
+]
+
+const SCOPES_BY_LENGTH = [...ROUTE_SCOPES].sort((a, b) => b.prefix.length - a.prefix.length)
+
+/** Resolve the scope a request needs. Fail-closed for unmapped /api paths. */
+export function requiredScopeFor(path: string, method: string): TokenScope {
+  const mutating = MUTATING_METHODS.has(method)
+  const entry = SCOPES_BY_LENGTH.find((e) => path === e.prefix || path.startsWith(`${e.prefix}/`))
+  if (entry) return mutating ? entry.write : entry.read
+  return 'admin'
+}
 
 /** Routes that NEVER require auth (the public surface). */
 const PUBLIC_PATH_EXACT = new Set([
@@ -49,11 +120,37 @@ export interface AuthMiddlewareOptions {
   csrfTrustedOrigins: string[]
   /** Set true to disable auth (dev / test). Default false. */
   disabled?: boolean
+  /** Shared failure rate limiter (SE-1). Absent in legacy callers/tests →
+   *  no limiting, behavior identical to pre-M2. */
+  limiter?: AuthRateLimiter
 }
 
 export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHandler {
   const trustedProxies = new Set(opts.trustedProxies)
   const csrfTrustedOrigins = new Set(opts.csrfTrustedOrigins)
+  const warnedUnmapped = new Set<string>()
+
+  /** Scope gate shared by every authenticated path below. */
+  const enforceScope = (c: Context, auth: AuthContext): Response | null => {
+    const path = c.req.path
+    if (!path.startsWith('/api/')) return null
+    const required = requiredScopeFor(path, c.req.method)
+    if (required === 'admin' && !SCOPES_BY_LENGTH.some((e) => path === e.prefix || path.startsWith(`${e.prefix}/`))) {
+      const group = path.split('/').slice(0, 3).join('/')
+      if (!warnedUnmapped.has(group)) {
+        warnedUnmapped.add(group)
+        log.warn('unmapped /api route group — locked to admin scope', { group })
+      }
+    }
+    if (scopesSatisfy(auth.scopes, required)) {
+      c.set('auth', auth)
+      return null
+    }
+    return c.json(
+      { error: 'Forbidden: insufficient scope', code: 'INSUFFICIENT_SCOPE', required },
+      403,
+    )
+  }
 
   return async (c: Context, next) => {
     if (opts.disabled) return next()
@@ -76,11 +173,44 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
     // configured. With a trusted proxy in front, the proxy IS at 127.0.0.1
     // from Alice's view, so trusting "localhost requests" would let every
     // public request through. See safe/playbooks/03-localhost-spoofing.md.
+    // Loopback keeps FULL trust (admin) — the local single-user workflow
+    // is the product's default and must stay zero-friction.
     if (trustedProxies.size === 0) {
       const clientIp = getSocketRemoteAddress(c)
       if (clientIp && isLoopbackIp(clientIp)) {
-        return next()
+        const denied = enforceScope(c, { actor: 'loopback', scopes: ['admin'] })
+        return denied ?? next()
       }
+    }
+
+    const ip = normalizeIp(getSocketRemoteAddress(c) ?? 'unknown')
+
+    // Lockout gate (SE-1) — checked before any credential is examined so a
+    // locked-out source cannot keep burning scrypt cycles either.
+    if (opts.limiter?.isLocked(ip)) {
+      return c.json({ error: 'Too many failed attempts', code: 'RATE_LIMITED' }, 429)
+    }
+
+    // Bearer token (SE-2) — scoped API tokens (`oat_…`) or the admin token.
+    const authz = c.req.header('authorization')
+    if (authz?.toLowerCase().startsWith('bearer ')) {
+      const candidate = authz.slice(7).trim()
+      if (candidate.startsWith('oat_')) {
+        const tok = await verifyApiToken(candidate)
+        if (tok) {
+          opts.limiter?.recordSuccess(ip)
+          const denied = enforceScope(c, { actor: `token:${tok.id}`, scopes: tok.scopes })
+          return denied ?? next()
+        }
+      } else if (await verifyToken(candidate)) {
+        opts.limiter?.recordSuccess(ip)
+        const denied = enforceScope(c, { actor: 'admin-token', scopes: ['admin'] })
+        return denied ?? next()
+      }
+      if (opts.limiter?.recordFailure(ip)) {
+        void appendAudit({ actor: 'system', action: 'auth.lockout', details: { ip, via: 'bearer' } })
+      }
+      return c.json({ error: 'Unauthorized', code: 'INVALID_TOKEN' }, 401)
     }
 
     // Session cookie check
@@ -111,9 +241,14 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
       // break legitimate CLI use.
     }
 
-    // Attach session to context for downstream handlers
+    // Attach session to context for downstream handlers. Sessions minted
+    // before M2 carry no scopes field → legacy admin.
     c.set('session', session)
-    return next()
+    const denied = enforceScope(c, {
+      actor: `session:${session.sid.slice(0, 8)}`,
+      scopes: session.scopes ?? ['admin'],
+    })
+    return denied ?? next()
   }
 }
 

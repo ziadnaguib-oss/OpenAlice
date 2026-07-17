@@ -13,3 +13,4 @@ Each row corresponds to one migration in `src/migrations/`. The runner applies p
 | `0011_workspace_issue_assignee_defaults` | 0.72.0-beta | 2026-07-04 | workspaces/<id>/.alice/issues/*.md | Remove legacy `assignee: unassigned` defaults from workspace issue files so missing assignees resolve to the owning workspace. |
 | `0012_recent_chat_workspace_preference` | 0.73.0-beta | 2026-07-11 | data/preferences.json, workspaces/workspaces.json, workspaces/state/sessions/*.json | Route Quick Chat to the most recently active durable Chat workspace instead of creating a new daily workspace. |
 | `0013_session_run_source` | 0.74.0-beta | 2026-07-11 | workspaces/state/sessions/*.json | Version Session records for durable headless-run provenance and idempotent return-to-session navigation. |
+| `0014_scoped_tokens` | 0.75.0-beta | 2026-07-17 | auth.json | Wrap the v1 single admin token as the admin record of the v2 scoped-token auth file. |

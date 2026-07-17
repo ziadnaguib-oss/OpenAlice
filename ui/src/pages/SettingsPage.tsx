@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocale, useSetLocale, LOCALE_LABELS } from '../i18n/useLocale'
 import { useEditorTabsPref } from '../live/editor-tabs-pref'
 import { preferencesApi, type WorkspaceShellStatus } from '../api/preferences'
+import { TokensSection } from '../components/settings/TokensSection'
 
 // ==================== Appearance ====================
 
@@ -199,6 +200,9 @@ function SettingsSection() {
         <ConfigSection title={t('settings.compaction.title')} description={t('settings.compaction.description')}>
           <CompactionForm config={config} />
         </ConfigSection>
+
+        {/* Scoped API tokens (M2) */}
+        <TokensSection />
       </div>
     </div>
   )

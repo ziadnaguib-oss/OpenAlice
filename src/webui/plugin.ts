@@ -35,6 +35,8 @@ import { resolveUTAUrl } from '../services/uta-supervisor/url.js'
 import { createWorkspaceService, type WorkspaceService } from '../workspaces/service.js'
 import { logger } from '../core/logger.js'
 import { createMetricsRoutes, createDebugBundleRoutes } from './routes/metrics.js'
+import { createTokenRoutes } from './routes/tokens.js'
+import { createAuthRateLimiter } from '../services/auth/index.js'
 
 const log = logger.child({ scope: 'webui' })
 
@@ -208,11 +210,15 @@ export class WebPlugin implements Plugin {
     const csrfTrustedOrigins = (process.env['OPENALICE_CSRF_TRUSTED_ORIGINS'] ?? '')
       .split(',').map((s) => s.trim()).filter(Boolean)
     const authDisabled = process.env['OPENALICE_DISABLE_AUTH'] === '1'
-    app.route('/api/auth', createAuthRoutes({ trustedProxies }))
+    // One limiter instance shared by the login route and the middleware's
+    // bearer path — failures draw from a single per-IP budget (SE-1).
+    const limiter = createAuthRateLimiter(ctx.config.security.authRateLimit)
+    app.route('/api/auth', createAuthRoutes({ trustedProxies, limiter }))
     app.use('*', createAuthMiddleware({
       trustedProxies,
       csrfTrustedOrigins,
       disabled: authDisabled,
+      limiter,
     }))
 
     // ==================== Mount route modules ====================
@@ -248,6 +254,7 @@ export class WebPlugin implements Plugin {
     app.route('/api/version', createVersionRoutes())
     app.route('/api/metrics', createMetricsRoutes(ctx, () => this.workspaceService))
     app.route('/api/debug', createDebugBundleRoutes(ctx))
+    app.route('/api/tokens', createTokenRoutes())
 
     // ==================== Workspaces (launcher-style PTY) ====================
     // Self-contained subsystem ported from auto-quant-launcher. Owns its own

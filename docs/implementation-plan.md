@@ -175,7 +175,25 @@ endpoint scrape asserted in a spec; `pnpm test:smoke` output still readable.
 
 ---
 
-### M2 — Scoped Tokens & Security Hardening *(Epic A · 2w · depends: M1)*
+### M2 — Scoped Tokens & Security Hardening *(Epic A · 2w · depends: M1)* ✅ IMPLEMENTED 2026-07-17
+
+> **Status:** shipped. auth.json v2 (admin record + scoped API tokens,
+> `oat_<id>_<secret>`, sha256 for machine tokens / scrypt kept for the admin
+> token); bearer auth added to the middleware with a fail-closed ROUTE_SCOPES
+> table (loopback keeps full trust — local UX unchanged, which is also the
+> rollback guarantee, alongside migration-snapshotted auth.json and
+> `security.json → authRateLimit.enabled=false`). Sessions inherit the
+> minting credential's scopes. Per-IP failure lockout (20/15min default)
+> shared between login and bearer paths. Hash-chained audit log
+> (`data/audit/audit.jsonl`) written by token mint/revoke, lockouts, and
+> trading commit/reject/push; verified via `GET /api/debug/audit`. Settings
+> UI mints/revokes tokens (+ demo handlers). Migration 0014 + spec. The
+> route-coverage spec parses plugin.ts mounts and fails on unclassified
+> prefixes. Deviations: `gate:approve` maps to the trading wallet gate today
+> (Action Gate joins in M9); UI section strings unlocalized pending the
+> settings i18n pass; audit writers use await (not fire-and-forget) so the
+> chain is durable before the response — deliberate strengthening of the
+> plan.
 
 **Objectives.** Replace single admin token with scoped tokens; rate-limit
 auth; append-only audit chain for sensitive actions. (SE-1, SE-2, SE-3.)

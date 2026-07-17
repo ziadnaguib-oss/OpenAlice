@@ -68,6 +68,16 @@ Observability: `GET /api/metrics` (Prometheus text) and `GET /api/debug/bundle`
 (crash bundle: versions, redacted config shape, recent log ring) ride the
 authenticated web port; disable both with `metrics.json → {"enabled": false}`.
 
+Auth (M2): loopback requests keep full trust — local dev stays zero-friction.
+Remote/programmatic callers authenticate with `Authorization: Bearer <token>`:
+either the admin token or a **scoped API token** minted in Settings → API
+tokens (scopes: `read`, `enqueue`, `gate:approve`, `admin`; plaintext shown
+once, format `oat_<id>_<secret>`). Failed auth is rate-limited per source IP
+(default 20 failures / 15 min → 15 min lockout; tune or disable in
+`security.json`). Token mints/revocations, lockouts, and trading
+commit/reject/push are recorded in a tamper-evident hash chain at
+`data/audit/audit.jsonl` — inspect via `GET /api/debug/audit`.
+
 ## Agent CLI Authentication
 
 OpenAlice does not run a model loop in-process. Each Workspace spawns a
