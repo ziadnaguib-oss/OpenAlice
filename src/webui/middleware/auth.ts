@@ -126,7 +126,7 @@ export interface AuthMiddlewareOptions {
 }
 
 export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHandler {
-  const trustedProxies = new Set(opts.trustedProxies)
+  const trustedProxies = new Set(opts.trustedProxies.map(normalizeIp))
   const csrfTrustedOrigins = new Set(opts.csrfTrustedOrigins)
   const warnedUnmapped = new Set<string>()
 
@@ -137,7 +137,9 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
     const required = requiredScopeFor(path, c.req.method)
     if (required === 'admin' && !SCOPES_BY_LENGTH.some((e) => path === e.prefix || path.startsWith(`${e.prefix}/`))) {
       const group = path.split('/').slice(0, 3).join('/')
-      if (!warnedUnmapped.has(group)) {
+      // Cap the dedupe set so an attacker spraying distinct /api/<x> paths
+      // cannot grow it without bound (each is still fail-closed to admin).
+      if (!warnedUnmapped.has(group) && warnedUnmapped.size < 200) {
         warnedUnmapped.add(group)
         log.warn('unmapped /api route group — locked to admin scope', { group })
       }
@@ -183,7 +185,7 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
       }
     }
 
-    const ip = normalizeIp(getSocketRemoteAddress(c) ?? 'unknown')
+    const ip = limiterClientIp(c, trustedProxies)
 
     // Lockout gate (SE-1) — checked before any credential is examined so a
     // locked-out source cannot keep burning scrypt cycles either.
@@ -204,7 +206,7 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
         }
       } else if (await verifyToken(candidate)) {
         opts.limiter?.recordSuccess(ip)
-        const denied = enforceScope(c, { actor: 'admin-token', scopes: ['admin'] })
+        const denied = enforceScope(c, { actor: 'token:admin', scopes: ['admin'] })
         return denied ?? next()
       }
       if (opts.limiter?.recordFailure(ip)) {
@@ -250,6 +252,25 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
     })
     return denied ?? next()
   }
+}
+
+/**
+ * The IP the failure limiter should key on (SE-1 / M2 QA M-1). Behind a
+ * trusted proxy the socket peer is the proxy for EVERY client, which would
+ * collapse all clients onto one bucket (global-lockout DoS + no per-client
+ * granularity). When the socket peer IS a trusted proxy, key on the first
+ * X-Forwarded-For hop instead (the real client). Otherwise the socket peer
+ * is the client — XFF from an untrusted peer is attacker-controlled and must
+ * be ignored. Falls back to the socket address (or 'unknown') if XFF is
+ * missing.
+ */
+export function limiterClientIp(c: Context, trustedProxies: ReadonlySet<string>): string {
+  const socket = normalizeIp(getSocketRemoteAddress(c) ?? 'unknown')
+  if (trustedProxies.size > 0 && trustedProxies.has(socket)) {
+    const first = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+    if (first) return normalizeIp(first)
+  }
+  return socket
 }
 
 /** Extracts the Node socket-level remote address from the Hono context. */

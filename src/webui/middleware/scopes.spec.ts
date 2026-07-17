@@ -129,6 +129,29 @@ describe('bearer rate limiting (SE-1)', () => {
   })
 })
 
+describe('limiter keying behind a trusted proxy (M2 QA M-1)', () => {
+  function appWithProxy(limiter: import('@/services/auth/rate-limit.js').AuthRateLimiter): Hono {
+    const app = new Hono()
+    app.use('*', mw.createAuthMiddleware({ trustedProxies: ['10.0.0.5'], csrfTrustedOrigins: [], limiter }))
+    app.all('*', (c) => c.json({ ok: true }))
+    return app
+  }
+  const viaProxy = { incoming: { socket: { remoteAddress: '10.0.0.5' } } }
+  const xff = (ip: string) => ({ 'authorization': 'Bearer oat_bad_cred', 'x-forwarded-for': ip })
+
+  it('keys on the X-Forwarded-For client, not the shared proxy socket', async () => {
+    const limiter = auth.createAuthRateLimiter({ enabled: true, maxFailures: 20, windowMinutes: 15, lockoutMinutes: 15 })
+    const app = appWithProxy(limiter)
+    // Client A burns its whole budget through the proxy.
+    for (let i = 0; i < 20; i++) {
+      await app.request('/api/metrics', { method: 'GET', headers: xff('198.51.100.1') }, viaProxy)
+    }
+    // Client A is locked; client B (same proxy socket) is NOT — no global lockout.
+    expect((await app.request('/api/metrics', { method: 'GET', headers: xff('198.51.100.1') }, viaProxy)).status).toBe(429)
+    expect((await app.request('/api/metrics', { method: 'GET', headers: xff('198.51.100.2') }, viaProxy)).status).toBe(401)
+  })
+})
+
 describe('route-scope coverage (fails when a new mount lacks classification)', () => {
   it('every /api prefix mounted in plugin.ts has a ROUTE_SCOPES entry', async () => {
     const source = await readFile(resolve(__dirname, '../plugin.ts'), 'utf-8')

@@ -27,6 +27,7 @@ import {
   isLoopbackIp,
   normalizeIp,
   getSocketRemoteAddress,
+  limiterClientIp,
 } from '../middleware/auth.js'
 
 const loginSchema = z.object({
@@ -101,7 +102,7 @@ export function createAuthRoutes(opts: AuthRouteOptions = {}) {
    */
   app.post('/login', async (c) => {
     const fromTrustedProxy = isTrustedProxyPeer(c, trustedProxies)
-    const limiterIp = normalizeIp(getSocketRemoteAddress(c) ?? 'unknown')
+    const limiterIp = limiterClientIp(c, trustedProxies)
 
     // Lockout gate (SE-1) BEFORE reading the body — a locked-out source
     // gets 429 without burning a scrypt verification.

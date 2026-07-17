@@ -194,6 +194,13 @@ endpoint scrape asserted in a spec; `pnpm test:smoke` output still readable.
 > settings i18n pass; audit writers use await (not fire-and-forget) so the
 > chain is durable before the response — deliberate strengthening of the
 > plan.
+> QA follow-up (same day): the PTY WebSocket upgrade now enforces the admin
+> scope (a read/enqueue/gate:approve session can no longer open a workspace
+> shell — QA H-1); the auth failure limiter keys on the real client IP behind
+> a trusted proxy (X-Forwarded-For first hop) instead of the shared proxy
+> socket, closing a global-lockout DoS (QA M-1); unmapped-route warn set
+> bounded; admin-bearer audit actor normalized to `token:admin`. New specs
+> cover WS scope enforcement and limiter-behind-proxy keying.
 
 **Objectives.** Replace single admin token with scoped tokens; rate-limit
 auth; append-only audit chain for sensitive actions. (SE-1, SE-2, SE-3.)
