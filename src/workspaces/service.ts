@@ -959,12 +959,24 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
             void dispatchHeadlessTaskMethod(ws, adapter, prompt, timeoutMs, issueId, {
               ...dispatchOpts,
               retry: { ...retry, attempt: retry.attempt + 1 },
-            }).catch((err) =>
-              launcherLogger.warn('headless.retry_dispatch_failed', {
-                wsId: ws.id, issueId, attempt: retry.attempt + 1, err,
-              }),
-            );
+            }).catch(async (err) => {
+              // The chain ends here (capacity full, or the dispatch threw).
+              // Record it ON THE RUN so the panel cannot show "attempt 1 of 3"
+              // forever while no further attempt is coming.
+              const reason = err instanceof Error ? err.message : String(err);
+              launcherLogger.warn('headless.retry_abandoned', {
+                wsId: ws.id, issueId, attempt: retry.attempt + 1, maxAttempts: retry.maxAttempts, reason,
+              });
+              await headlessTasks
+                .complete(rec.taskId, {
+                  error: `retry ${retry.attempt + 1}/${retry.maxAttempts} not dispatched: ${reason}`,
+                })
+                .catch(() => undefined);
+            });
           }, delay);
+          // Deliberately unref'd: a pending retry must not hold the process
+          // open at shutdown. In-memory retries do not survive a restart —
+          // durable queuing is M4's job.
           t.unref?.();
           return;
         }

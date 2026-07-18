@@ -256,6 +256,18 @@ with safe defaults.
 > opt in later. Run-panel UI still shows `status`; surfacing `outcome`/attempt
 > chips is a follow-up (the API already returns them, demo handler added for
 > dry-run).
+> QA follow-up (first real CI run): the packaged-desktop smoke was red on all
+> three platforms — **an M1 regression, not pre-existing** as first reported:
+> the console→structured-logger migration made
+> `/local tool gateway listening on (.+)/` swallow the JSON envelope's `"}`,
+> producing an ENOENT socket path. Parsing moved to a JSON-aware, unit-tested
+> helper (`scripts/lib/log-parse.mjs`, 7 contract tests). Calendar skips now log
+> once per issue per closed day instead of once per 60s tick (measured: 10 ticks
+> → 10 lines, which would also flush M1's 500-line crash-bundle ring; now 1).
+> An abandoned retry chain (capacity/dispatch failure) is recorded on the run
+> record instead of logged-and-forgotten, and dry-run issues carry `truncated`
+> when the per-issue cap elides later fires. In-memory retries still do not
+> survive a restart — durable queuing remains M4's job.
 
 **Objectives.** Headless runs never zombie, classify their outcomes, and
 retry sanely. (AG-2, AG-3, AG-6, AU-4, AU-7.)

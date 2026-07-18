@@ -122,6 +122,7 @@ function scannerFor(
     markers?: MarkerStore
     now?: number
     adapter?: CliAdapter
+    logger?: Logger
   } = {},
 ) {
   const dispatch = opts.dispatch ?? vi.fn(async () => ({ taskId: 'run-1' }))
@@ -131,7 +132,7 @@ function scannerFor(
     resolveAdapter: () => opts.adapter ?? headlessAdapter,
     dispatch,
     markers,
-    logger: noopLogger,
+    logger: opts.logger ?? noopLogger,
     now: () => opts.now ?? NOW,
   })
   return { scanner, dispatch, markers }
@@ -320,6 +321,23 @@ describe('ScheduleScanner', () => {
     await scanner.scan()
     expect(dispatch).not.toHaveBeenCalled()
     expect(markers.get('w1', 't1')).toBeUndefined() // stays due for the next open day
+  })
+
+  it('logs a calendar skip ONCE per closed day, not once per tick', async () => {
+    // Regression: `fireBase` returns 0 for a never-fired `every`, so the issue
+    // is permanently due; a skipped fire leaves the marker unset. Without
+    // dedupe this logged every 60s tick (~1,440/day) and flushed the
+    // crash-bundle log ring.
+    const ws = await makeWs('w1', [
+      { id: 't1', title: 'i1', when: { kind: 'every', every: '30m' }, what: 'go', calendar: 'weekdays' },
+    ])
+    const info = vi.fn()
+    const logger = { info, warn() {}, error() {}, debug() {}, child() { return logger } } as unknown as Logger
+    const { scanner, dispatch } = scannerFor([ws], { now: SAT, logger })
+    for (let i = 0; i < 10; i++) await scanner.scan()
+    const skips = info.mock.calls.filter((c) => c[0] === 'schedule.calendar_skip').length
+    expect(skips).toBe(1)
+    expect(dispatch).not.toHaveBeenCalled()
   })
 
   it('fires a weekdays-calendar issue on a weekday', async () => {
