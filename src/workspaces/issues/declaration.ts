@@ -97,6 +97,19 @@ export const issueFrontmatterSchema = z.object({
   /** Calendar gate for scheduled fires (AU-4): skip weekends / US-market
    *  holidays. Default 'always' preserves prior behavior. */
   calendar: z.enum(['always', 'weekdays', 'us-market']).default('always'),
+  /** Issue ids in THIS workspace that must be terminal before this issue's
+   *  run may be claimed (M4). Unknown ids are treated as satisfied. */
+  depends_on: z.array(z.string().min(1)).default([]),
+  /** Queue lane; empty uses the per-workspace serial lane. A shared lane name
+   *  lets several issues run in parallel under one budget (fan-out). */
+  lane: z.string().min(1).optional(),
+  /** Follow-up issue ids to enqueue when this issue's run finishes (M4). */
+  chain: z
+    .object({
+      onSuccess: z.string().min(1).optional(),
+      onFailure: z.string().min(1).optional(),
+    })
+    .optional(),
 })
 export type IssueFrontmatter = z.infer<typeof issueFrontmatterSchema>
 

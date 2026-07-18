@@ -182,7 +182,7 @@ the actual workers (invariant 1).
 
 ```text
 <OPENALICE_HOME>/data/queue/
-├── pending/<priority>-<ts>-<id>.json     one file per task (atomic rename to claim)
+├── pending/<priority>-<ts>-<id>.json     one file per task (claimed by exclusive create)
 ├── running/<id>.json                     claimed tasks + heartbeat mtime
 ├── done/<yyyy-mm>/<id>.json              journal (retention-pruned)
 └── lanes.json                            lane definitions + concurrency
@@ -194,6 +194,11 @@ chain: { onSuccess?: issueRef, onFailure?: issueRef } }`.
 
 Semantics:
 
+- **Claim** (implemented M4): a task is claimed by EXCLUSIVELY CREATING its
+  `running/<id>.json` (`wx` → `O_CREAT|O_EXCL`), then deleting the pending
+  file. This spec originally said "atomic rename" — that is **not** safe on
+  Windows, where two concurrent `fs.rename` calls on the same source both
+  report success. Exclusive create is atomic on both platforms.
 - **Lanes** (AU-5): per-workspace serial lane by default (no self-competing
   runs), named parallel lanes for fan-out (MA-4). Global cap stays.
 - **Priorities**: interactive-initiated > event-triggered > cron.

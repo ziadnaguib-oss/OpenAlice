@@ -297,7 +297,42 @@ per-issue frontmatter opts in; classification is additive metadata.
 
 ---
 
-### M4 — Durable Task Queue *(Epic B · 2w · depends: M3)*
+### M4 — Durable Task Queue *(Epic B · 2w · depends: M3)* ✅ IMPLEMENTED 2026-07-18
+
+> **Status:** shipped. `src/workspaces/queue/` holds the store
+> (`data/queue/{pending,running}` + `lanes.json`) and the dispatch loop that
+> claims work and spawns the headless runs that ARE the workers. Priorities
+> (interactive > event > cron) and claim order are encoded in the pending
+> filename; `notBefore` carries retry backoff **on disk**, closing M3's hole
+> where an in-memory timer lost the retry on shutdown. Lanes: per-workspace
+> serial by default, named lanes for fan-out, global cap 8. Crash-safe boot
+> reconcile re-queues `running/` entries whose owning PID is gone (attempt+1,
+> exactly once) and abandons ones past `maxAttempts`. `depends_on` gates claims
+> on live issue state; `chain.onSuccess/onFailure` enqueue a follow-up issue.
+> Migration `0015` seeds `lanes.json` so the rollback lever is discoverable
+> (`perWorkspaceSerial: false` + `globalConcurrency: 8` == the old flat cap).
+>
+> **Deviation — claim primitive.** ai-os-design § 5 specifies claim-by-`rename`
+> as atomic. That is **false on Windows**: two concurrent `fs.rename` calls on
+> one source BOTH report success (verified directly; sequential renames
+> correctly ENOENT — libuv's Windows rename retries internally). The
+> 100-iteration acceptance spec caught it. The claim is therefore an exclusive
+> create (`wx` → `O_CREAT|O_EXCL`) of `running/<id>.json`, atomic on both
+> platforms, with the crash window (created running, pending not yet removed)
+> closed by `claimable()` skipping already-running ids and `release()` sweeping
+> stale pending files. **The design doc has been corrected.**
+>
+> **Deviation — no `done/` journal.** `HeadlessTaskRegistry` already is the run
+> journal (with pruning); a second overlapping journal would be two sources of
+> truth for one fact. Completed tasks release their queue entry and live on in
+> the registry, which gained a `queued` status so one run keeps ONE id from
+> submission to journal.
+>
+> **Deviation — capacity no longer rejects.** Over-cap work waits in `pending/`
+> instead of throwing `HeadlessCapacityError` (type kept for callers that
+> narrow on it), so the manual-dispatch route no longer 429s — queuing is the
+> better behaviour and is what the milestone asks for. UI queue view is API +
+> demo-handler only; the panel widget is a follow-up, as in M3.
 
 **Objectives.** Replace the flat 8-cap dispatch with the file-backed queue:
 lanes, priorities, retries, crash-safe claims, chaining. (ai-os-design § 5;

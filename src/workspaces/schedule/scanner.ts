@@ -33,6 +33,7 @@ import type { WorkspaceMeta, WorkspaceRegistry } from '../workspace-registry.js'
 
 import { isFireable, issueFirePrompt, readWorkspaceIssues, type IssueRecord } from '../issues/declaration.js'
 import { calendarSkipReason, etDateOf } from './market-calendar.js'
+import { PRIORITY } from '../queue/types.js'
 
 import {
   fireBase,
@@ -99,10 +100,16 @@ export interface ScheduleScannerDeps {
      *  its real run history. The scanner ALWAYS passes it (it only fires from an
      *  issue); manual/external dispatch callers omit it. */
     issueId?: string,
-    /** Retry policy + heartbeat cap threaded from the issue's frontmatter. */
+    /** Retry policy, heartbeat cap and queue placement threaded from the
+     *  issue's frontmatter (M3 + M4). */
     dispatchOpts?: {
       retry?: { attempt: number; maxAttempts: number; backoffMs: number }
       idleTimeoutMs?: number
+      lane?: string
+      priority?: number
+      source?: 'manual' | 'schedule' | 'chain' | 'webhook'
+      dependsOn?: string[]
+      chain?: { onSuccess?: string; onFailure?: string }
     },
   ) => Promise<{ taskId: string }>
   markers: MarkerStore
@@ -345,6 +352,13 @@ export class ScheduleScanner {
       ...(issue.retries > 0
         ? { retry: { attempt: 1, maxAttempts: issue.retries + 1, backoffMs } }
         : {}),
+      // Queue placement (M4). A scheduled fire is cron-priority; lane/deps/chain
+      // come straight from the issue declaration.
+      priority: PRIORITY.cron,
+      source: 'schedule' as const,
+      ...(issue.lane ? { lane: issue.lane } : {}),
+      ...(issue.depends_on.length > 0 ? { dependsOn: issue.depends_on } : {}),
+      ...(issue.chain ? { chain: issue.chain } : {}),
     }
     try {
       // `taskId` here is the firing ISSUE's id (keyed by filename stem) — thread

@@ -20,7 +20,8 @@ import { dirname, join } from 'node:path'
 import type { Logger } from './logger.js'
 import type { HeadlessOutcome } from './headless-task.js'
 
-export type HeadlessTaskStatus = 'running' | 'done' | 'failed' | 'interrupted'
+/** `queued` (M4) = accepted into the durable queue, not yet claimed/spawned. */
+export type HeadlessTaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'interrupted'
 
 export interface HeadlessTaskRecord {
   readonly taskId: string
@@ -112,6 +113,8 @@ export class HeadlessTaskRegistry {
   private async reconcile(): Promise<void> {
     let changed = false
     for (const t of this.tasks) {
+      // `queued` records are NOT touched: the durable queue (M4) owns their
+      // fate and re-queues or abandons them on its own boot reconcile.
       if (t.status === 'running') {
         t.status = 'interrupted'
         t.finishedAt = t.finishedAt ?? t.startedAt
@@ -119,6 +122,15 @@ export class HeadlessTaskRegistry {
       }
     }
     if (changed) await this.flush()
+  }
+
+  /** Flip a queued record to running when the dispatch loop claims it (M4). */
+  async markRunning(taskId: string, startedAt: number): Promise<void> {
+    const rec = this.tasks.find((t) => t.taskId === taskId)
+    if (!rec || rec.status !== 'queued') return
+    rec.status = 'running'
+    ;(rec as { startedAt: number }).startedAt = startedAt
+    await this.flush()
   }
 
   async create(input: {
@@ -130,13 +142,17 @@ export class HeadlessTaskRegistry {
     issueId?: string
     attempt?: number
     maxAttempts?: number
+    /** M4: the queue supplies the id so one run has ONE id across queue + registry. */
+    taskId?: string
+    /** M4: `queued` until the dispatch loop claims it. */
+    status?: HeadlessTaskStatus
   }): Promise<HeadlessTaskRecord> {
     const rec: HeadlessTaskRecord = {
-      taskId: randomUUID(),
+      taskId: input.taskId ?? randomUUID(),
       wsId: input.wsId,
       agent: input.agent,
       prompt: input.prompt,
-      status: 'running',
+      status: input.status ?? 'running',
       startedAt: input.startedAt,
       // Keep the field absent (not `undefined`) on manual runs so the JSON stays clean.
       ...(input.issueId ? { issueId: input.issueId } : {}),
