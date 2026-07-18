@@ -51,6 +51,30 @@ describe('HeadlessTaskRegistry', () => {
     expect(reg.runningCount()).toBe(0)
   })
 
+  it('persists the classified outcome, killReason, and retry attempt (M3)', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    const a = await reg.create({
+      wsId: 'w1', agent: 'claude', prompt: 'scan', startedAt: 1, issueId: 'daily', attempt: 2, maxAttempts: 3,
+    })
+    expect(a.attempt).toBe(2)
+    expect(a.maxAttempts).toBe(3)
+    await reg.complete(a.taskId, {
+      status: 'failed', outcome: 'timeout', killed: true, killReason: 'idle', finishedAt: 2,
+    })
+    const reloaded = await HeadlessTaskRegistry.load(path, noopLogger)
+    const rec = reloaded.get(a.taskId)
+    expect(rec?.outcome).toBe('timeout')
+    expect(rec?.killReason).toBe('idle')
+    expect(rec?.attempt).toBe(2)
+  })
+
+  it('omits retry fields on a plain (non-retrying) run so the JSON stays clean', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    const a = await reg.create({ wsId: 'w1', agent: 'claude', prompt: 'x', startedAt: 1 })
+    expect('attempt' in a).toBe(false)
+    expect('maxAttempts' in a).toBe(false)
+  })
+
   it('list filters by wsId / status / limit', async () => {
     const reg = await HeadlessTaskRegistry.load(path, noopLogger)
     const a = await reg.create({ wsId: 'w1', agent: 'codex', prompt: 'x', startedAt: 1 })

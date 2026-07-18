@@ -32,6 +32,7 @@ function result(overrides: Partial<HeadlessTaskResult>): HeadlessTaskResult {
     exitCode: 1,
     signal: null,
     killed: false,
+    killReason: null,
     durationMs: 12,
     stdoutTail: '',
     stderrTail: '',

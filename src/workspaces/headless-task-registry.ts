@@ -18,6 +18,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { Logger } from './logger.js'
+import type { HeadlessOutcome } from './headless-task.js'
 
 export type HeadlessTaskStatus = 'running' | 'done' | 'failed' | 'interrupted'
 
@@ -42,6 +43,18 @@ export interface HeadlessTaskRecord {
   exitCode?: number | null
   signal?: string | null
   killed?: boolean
+  /** Why the watchdog killed the run, when `killed` (AG-2). */
+  killReason?: 'idle' | 'cap' | null
+  /**
+   * The classified terminal outcome (AG-6): success | no-report | error |
+   * timeout. Richer than `status` (which stays running/done/failed/interrupted
+   * for back-compat): the panel shows the outcome, the retry logic reads it.
+   */
+  outcome?: HeadlessOutcome
+  /** 1-based attempt number within a retry chain (AG-3); 1 for a first/only run. */
+  attempt?: number
+  /** Total attempts allowed for this dispatch (attempt of maxAttempts). */
+  maxAttempts?: number
   error?: string
   /**
    * The agent CLI's OWN session id, captured from the run's stdout (adapter's
@@ -115,6 +128,8 @@ export class HeadlessTaskRegistry {
     startedAt: number
     /** Set only when an issue fired this run (scheduled scan); omitted for manual/external runs. */
     issueId?: string
+    attempt?: number
+    maxAttempts?: number
   }): Promise<HeadlessTaskRecord> {
     const rec: HeadlessTaskRecord = {
       taskId: randomUUID(),
@@ -125,6 +140,8 @@ export class HeadlessTaskRegistry {
       startedAt: input.startedAt,
       // Keep the field absent (not `undefined`) on manual runs so the JSON stays clean.
       ...(input.issueId ? { issueId: input.issueId } : {}),
+      ...(input.attempt ? { attempt: input.attempt } : {}),
+      ...(input.maxAttempts ? { maxAttempts: input.maxAttempts } : {}),
     }
     this.tasks.push(rec)
     await this.flush()
@@ -136,7 +153,7 @@ export class HeadlessTaskRegistry {
     patch: Partial<
       Pick<
         HeadlessTaskRecord,
-        'status' | 'finishedAt' | 'durationMs' | 'exitCode' | 'signal' | 'killed' | 'error'
+        'status' | 'finishedAt' | 'durationMs' | 'exitCode' | 'signal' | 'killed' | 'killReason' | 'outcome' | 'error'
       >
     >,
   ): Promise<void> {

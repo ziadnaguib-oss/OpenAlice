@@ -29,7 +29,12 @@ import { loadConfig, type ServerConfig } from './config.js';
 import { ensureAgentCredentialReady } from './agent-credential-readiness.js';
 import { logger as launcherLogger } from './logger.js';
 import { runHeadlessProbe, type HeadlessProbeResult } from './probe.js';
-import { runHeadlessTask, type HeadlessTaskResult } from './headless-task.js';
+import {
+  runHeadlessTask,
+  classifyHeadlessOutcome,
+  isRetryableOutcome,
+  type HeadlessTaskResult,
+} from './headless-task.js';
 import {
   checkingRuntimeReadinessRow,
   failedRuntimeReadinessRow,
@@ -45,7 +50,7 @@ import {
   type AgentRuntimeReadinessSource,
 } from './agent-runtime-readiness.js';
 import { ScheduleMarkerStore } from './schedule/marker-store.js';
-import { ScheduleScanner, DEFAULT_INTERVAL_MS } from './schedule/scanner.js';
+import { ScheduleScanner, DEFAULT_INTERVAL_MS, type ScheduleDryRun } from './schedule/scanner.js';
 import {
   readWorkspaceIssues,
   snapshotScheduledIssue,
@@ -214,6 +219,9 @@ export interface WorkspaceService {
    *  directory (scheduled issues only) + each task's last-fired marker and
    *  computed next-due. Powers GET /api/schedule. */
   scheduleSnapshot(): Promise<ScheduleSnapshot>;
+  /** Preview the planned scheduled fires over the next `days` days without
+   *  executing anything (AU-7). Powers GET /api/schedule/dry-run. */
+  scheduleDryRun(days: number): Promise<ScheduleDryRun>;
   /** Read-only snapshot of every workspace's `.alice/issues/` directory — ALL
    *  issues (scheduled or not), scheduled ones enriched with firing markers.
    *  Powers the global Issue board GET /api/issues. */
@@ -629,6 +637,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     exitCode: -1,
     signal: null,
     killed: false,
+    killReason: null,
     durationMs: 0,
     stdoutTail: '',
     stderrTail: message,
@@ -816,7 +825,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     // Dispatch-path extras: a taskId keys the on-disk task log; onSessionId
     // fires when the adapter's stdout scanner captures the agent's own session
     // id (recorded WHILE running, so the panel can offer "open as session").
-    opts: { taskId?: string; onSessionId?: (id: string) => void } = {},
+    opts: { taskId?: string; onSessionId?: (id: string) => void; idleTimeoutMs?: number } = {},
   ): Promise<HeadlessTaskResult> => {
     if (!adapter.capabilities.headless || !adapter.composeHeadlessCommand) {
       throw new Error(`adapter "${adapter.id}" has no headless mode`);
@@ -847,6 +856,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       cwd,
       env,
       timeoutMs,
+      ...(opts.idleTimeoutMs ? { idleTimeoutMs: opts.idleTimeoutMs } : {}),
       logger: launcherLogger.child({ scope: 'headless', wsId: ws.id, agent: adapter.id }),
       ...(logPaths ? { stdoutFile: logPaths.stdout, stderrFile: logPaths.stderr } : {}),
       ...(adapter.extractHeadlessSessionId
@@ -874,6 +884,13 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     // The firing issue's id, when this dispatch came from the ScheduleScanner.
     // Manual/external runs (the workspace "run task" route) leave it undefined.
     issueId?: string,
+    // Retry policy (AG-3) + heartbeat idle cap (AG-2) — threaded by the scanner
+    // from issue frontmatter. `attempt` is 1-based; the scanner omits the whole
+    // object for manual runs and unscheduled dispatch.
+    dispatchOpts?: {
+      retry?: { attempt: number; maxAttempts: number; backoffMs: number };
+      idleTimeoutMs?: number;
+    },
   ): Promise<{ taskId: string }> => {
     if (!adapter.capabilities.headless || !adapter.composeHeadlessCommand) {
       throw new Error(`adapter "${adapter.id}" has no headless mode`);
@@ -887,19 +904,22 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     if (headlessTasks.runningCount() >= MAX_CONCURRENT_HEADLESS) {
       throw new HeadlessCapacityError(MAX_CONCURRENT_HEADLESS);
     }
+    const retry = dispatchOpts?.retry;
     const rec = await headlessTasks.create({
       wsId: ws.id,
       agent: adapter.id,
       prompt,
       startedAt: Date.now(),
       ...(issueId ? { issueId } : {}),
+      ...(retry ? { attempt: retry.attempt, maxAttempts: retry.maxAttempts } : {}),
     });
-    // Fire-and-forget: run to natural exit, then fill the record. NOTE: status
-    // is judged by exit code — pi can exit 0 on an in-band model error, so
-    // "done" means "process exited cleanly", not "the agent succeeded"; the
-    // operator confirms via the Inbox / the task's tail.
+    // Fire-and-forget: run to natural exit, then fill the record. Status is
+    // derived from the classified OUTCOME (AG-6): success/no-report → done,
+    // error/timeout → failed. "done" still means "exited cleanly"; the operator
+    // confirms real work via the Inbox.
     void runHeadlessTaskMethod(ws, adapter, prompt, timeoutMs, {
       taskId: rec.taskId,
+      ...(dispatchOpts?.idleTimeoutMs ? { idleTimeoutMs: dispatchOpts.idleTimeoutMs } : {}),
       onSessionId: (id) =>
         void headlessTasks
           .setAgentSessionId(rec.taskId, id)
@@ -908,15 +928,47 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
           ),
     })
       .then(async (r) => {
-        const status = r.killed ? 'failed' : r.exitCode === 0 ? 'done' : 'failed';
+        const outcome = classifyHeadlessOutcome(r);
+        const status = outcome === 'success' || outcome === 'no-report' ? 'done' : 'failed';
         await headlessTasks.complete(rec.taskId, {
           status,
+          outcome,
+          killReason: r.killReason,
           finishedAt: Date.now(),
           durationMs: r.durationMs,
           exitCode: r.exitCode,
           signal: r.signal,
           killed: r.killed,
         });
+
+        // Retry (AG-3): a failed outcome with attempts remaining re-dispatches
+        // after exponential backoff. We return BEFORE closing the one-shot
+        // issue so a retried issue stays open until the chain truly ends.
+        if (retry && isRetryableOutcome(outcome) && retry.attempt < retry.maxAttempts) {
+          const delay = retry.backoffMs * 2 ** (retry.attempt - 1);
+          launcherLogger.info('headless.retry_scheduled', {
+            wsId: ws.id,
+            issueId,
+            taskId: rec.taskId,
+            outcome,
+            attempt: retry.attempt,
+            maxAttempts: retry.maxAttempts,
+            delayMs: delay,
+          });
+          const t = setTimeout(() => {
+            void dispatchHeadlessTaskMethod(ws, adapter, prompt, timeoutMs, issueId, {
+              ...dispatchOpts,
+              retry: { ...retry, attempt: retry.attempt + 1 },
+            }).catch((err) =>
+              launcherLogger.warn('headless.retry_dispatch_failed', {
+                wsId: ws.id, issueId, attempt: retry.attempt + 1, err,
+              }),
+            );
+          }, delay);
+          t.unref?.();
+          return;
+        }
+
         // Scheduled one-shot issues are the only board items whose lifecycle can
         // be closed mechanically from a run exit. Repeating schedules keep their
         // issue open; failed one-shots stay open so the operator can inspect and
@@ -1346,6 +1398,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     runHeadlessTask: runHeadlessTaskMethod,
     dispatchHeadlessTask: dispatchHeadlessTaskMethod,
     scheduleSnapshot,
+    scheduleDryRun: (days: number) => scheduleScanner.dryRun(days),
     issuesSnapshot,
     issueDetail,
     resolveIssuesByName,

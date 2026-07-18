@@ -112,6 +112,9 @@ describe('workspace default assignee projection', () => {
     status: 'todo',
     priority: 'none',
     assignee: 'unassigned',
+    retries: 0,
+    backoff: '30s',
+    calendar: 'always',
     body: '',
   } as const
 

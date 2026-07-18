@@ -20,5 +20,13 @@ export function createScheduleRoutes(svc: WorkspaceService): Hono {
     return c.json(await svc.scheduleSnapshot())
   })
 
+  // GET /api/schedule/dry-run?days=7 → planned fires over the horizon, with
+  // calendar-skip annotations, executing nothing (AU-7).
+  app.get('/dry-run', async (c) => {
+    const raw = Number(c.req.query('days') ?? 7)
+    const days = Number.isFinite(raw) ? Math.min(Math.max(1, Math.trunc(raw)), 90) : 7
+    return c.json(await svc.scheduleDryRun(days))
+  })
+
   return app
 }

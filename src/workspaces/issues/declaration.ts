@@ -88,6 +88,15 @@ export const issueFrontmatterSchema = z.object({
   what: z.string().min(1).optional(),
   /** Which agent runtime to run the scheduled fire with; omitted uses the issue default / workspace default / first runtime. */
   agent: z.string().min(1).optional(),
+  /** Retry the scheduled run on a failed outcome (error/timeout) up to N extra
+   *  attempts, with exponential backoff (AG-3). 0 (default) = no retry. */
+  retries: z.number().int().min(0).max(5).default(0),
+  /** Base backoff duration between retries (e.g. "30s", "2m"); doubles each
+   *  attempt. Only meaningful with `retries` > 0. */
+  backoff: z.string().min(1).default('30s'),
+  /** Calendar gate for scheduled fires (AU-4): skip weekends / US-market
+   *  holidays. Default 'always' preserves prior behavior. */
+  calendar: z.enum(['always', 'weekdays', 'us-market']).default('always'),
 })
 export type IssueFrontmatter = z.infer<typeof issueFrontmatterSchema>
 

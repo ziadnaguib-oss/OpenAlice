@@ -71,6 +71,9 @@ interface IssueSpec {
   priority?: string
   agent?: string
   body?: string
+  retries?: number
+  backoff?: string
+  calendar?: string
 }
 
 /** Serialize one issue spec to its `.alice/issues/<id>.md` frontmatter form. */
@@ -80,6 +83,9 @@ function issueMd(spec: IssueSpec): string {
   if (spec.priority) lines.push(`priority: ${spec.priority}`)
   if (spec.what) lines.push(`what: ${spec.what}`)
   if (spec.agent) lines.push(`agent: ${spec.agent}`)
+  if (spec.retries !== undefined) lines.push(`retries: ${spec.retries}`)
+  if (spec.backoff) lines.push(`backoff: ${spec.backoff}`)
+  if (spec.calendar) lines.push(`calendar: ${spec.calendar}`)
   if (spec.when) {
     const w = spec.when
     const inner =
@@ -138,7 +144,7 @@ describe('ScheduleScanner', () => {
     await scanner.scan()
     expect(dispatch).toHaveBeenCalledTimes(1)
     // 5th arg = the firing issue's id, threaded so the run records its origin.
-    expect(dispatch).toHaveBeenCalledWith(ws, headlessAdapter, 'go', expect.any(Number), 't1')
+    expect(dispatch).toHaveBeenCalledWith(ws, headlessAdapter, 'go', expect.any(Number), 't1', expect.objectContaining({ idleTimeoutMs: expect.any(Number) }))
     expect(markers.get('w1', 't1')).toBe(NOW)
   })
 
@@ -160,7 +166,7 @@ describe('ScheduleScanner', () => {
     const { scanner, dispatch } = scannerFor([ws])
     await scanner.scan()
     expect(dispatch).toHaveBeenCalledTimes(1)
-    expect(dispatch).toHaveBeenCalledWith(ws, headlessAdapter, 'go', expect.any(Number), 'sched')
+    expect(dispatch).toHaveBeenCalledWith(ws, headlessAdapter, 'go', expect.any(Number), 'sched', expect.objectContaining({ idleTimeoutMs: expect.any(Number) }))
     expect(scanner.snapshot()!.workspaces[0].tasks.map((t) => t.id)).toEqual(['sched'])
   })
 
@@ -170,7 +176,7 @@ describe('ScheduleScanner', () => {
     ])
     const { scanner, dispatch } = scannerFor([ws])
     await scanner.scan()
-    expect(dispatch).toHaveBeenCalledWith(ws, headlessAdapter, 'Do research\n\nscan movers', expect.any(Number), 't1')
+    expect(dispatch).toHaveBeenCalledWith(ws, headlessAdapter, 'Do research\n\nscan movers', expect.any(Number), 't1', expect.objectContaining({ idleTimeoutMs: expect.any(Number) }))
   })
 
   it('fires a never-fired cron issue whose occurrence is within the last tick (not never)', async () => {
@@ -299,5 +305,77 @@ describe('ScheduleScanner', () => {
     const { scanner } = scannerFor([ws], { markers })
     await scanner.scan()
     expect(markers.get('w1', 'removed')).toBeUndefined()
+  })
+
+  // ── AU-4: calendar gating ────────────────────────────────────────────
+  // Jul 4 2026 is a Saturday; Jul 6 2026 is a Monday (16:00 UTC ≈ noon ET).
+  const SAT = Date.UTC(2026, 6, 4, 16)
+  const MON = Date.UTC(2026, 6, 6, 16)
+
+  it('skips (does not fire or mark) a weekdays-calendar issue on a weekend', async () => {
+    const ws = await makeWs('w1', [
+      { id: 't1', title: 'i1', when: { kind: 'every', every: '30m' }, what: 'go', calendar: 'weekdays' },
+    ])
+    const { scanner, dispatch, markers } = scannerFor([ws], { now: SAT })
+    await scanner.scan()
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(markers.get('w1', 't1')).toBeUndefined() // stays due for the next open day
+  })
+
+  it('fires a weekdays-calendar issue on a weekday', async () => {
+    const ws = await makeWs('w1', [
+      { id: 't1', title: 'i1', when: { kind: 'every', every: '30m' }, what: 'go', calendar: 'weekdays' },
+    ])
+    const { scanner, dispatch } = scannerFor([ws], { now: MON })
+    await scanner.scan()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+  })
+
+  // ── AG-3: retry policy threaded to dispatch ──────────────────────────
+  it('threads a retry policy from `retries`/`backoff` frontmatter', async () => {
+    const ws = await makeWs('w1', [
+      { id: 't1', title: 'i1', when: { kind: 'every', every: '30m' }, what: 'go', retries: 2, backoff: '10s' },
+    ])
+    const { scanner, dispatch } = scannerFor([ws])
+    await scanner.scan()
+    const opts = (dispatch as ReturnType<typeof vi.fn>).mock.calls[0]![5]
+    expect(opts.retry).toEqual({ attempt: 1, maxAttempts: 3, backoffMs: 10_000 })
+    expect(opts.idleTimeoutMs).toBeGreaterThan(0)
+  })
+
+  it('omits the retry policy when retries is 0 (default)', async () => {
+    const ws = await makeWs('w1', [{ id: 't1', title: 'i1', when: { kind: 'every', every: '30m' }, what: 'go' }])
+    const { scanner, dispatch } = scannerFor([ws])
+    await scanner.scan()
+    const opts = (dispatch as ReturnType<typeof vi.fn>).mock.calls[0]![5]
+    expect(opts.retry).toBeUndefined()
+  })
+
+  // ── AU-7: dry-run ────────────────────────────────────────────────────
+  it('dryRun previews upcoming fires without dispatching or marking', async () => {
+    const ws = await makeWs('w1', [
+      { id: 't1', title: 'Daily scan', when: { kind: 'every', every: '12h' }, what: 'go' },
+    ])
+    const { scanner, dispatch, markers } = scannerFor([ws])
+    const plan = await scanner.dryRun(2, MON)
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(markers.get('w1', 't1')).toBeUndefined()
+    expect(plan.days).toBe(2)
+    expect(plan.workspaces[0]?.issues[0]?.id).toBe('t1')
+    expect(plan.workspaces[0]!.issues[0]!.fires.length).toBeGreaterThan(1)
+    expect(plan.workspaces[0]!.issues[0]!.fires[0]!.at).toBeGreaterThanOrEqual(MON)
+  })
+
+  it('dryRun annotates calendar-skipped fires', async () => {
+    const ws = await makeWs('w1', [
+      { id: 't1', title: 'Weekday scan', when: { kind: 'every', every: '12h' }, what: 'go', calendar: 'weekdays' },
+    ])
+    const { scanner } = scannerFor([ws])
+    // Start on Friday so the horizon (5 days, 12h cadence) crosses the weekend.
+    const FRI = Date.UTC(2026, 6, 3, 16)
+    const plan = await scanner.dryRun(5, FRI)
+    const fires = plan.workspaces[0]!.issues[0]!.fires
+    expect(fires.some((f) => f.skipped && f.skipReason === 'weekend')).toBe(true)
+    expect(fires.some((f) => !f.skipped)).toBe(true)
   })
 })

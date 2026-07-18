@@ -231,7 +231,31 @@ with safe defaults.
 
 ---
 
-### M3 — Headless Reliability *(Epic A · 1.5w · depends: M1)*
+### M3 — Headless Reliability *(Epic A · 1.5w · depends: M1)* ✅ IMPLEMENTED 2026-07-18
+
+> **Status:** shipped. AG-2: the runner's watchdog is now dual-condition — an
+> idle **heartbeat** (no stdout/stderr for `idleTimeoutMs`, 5 min for scheduled
+> runs) plus the absolute cap — recording `killReason: 'idle' | 'cap'`.
+> AG-6: four outcome classes (`success | no-report | error | timeout`) derived
+> from killed/exitCode/assistant-turn presence, persisted on the run record and
+> served by `/api/headless`; `status` stays the legacy 4-value field.
+> AG-3: `retries` + `backoff` issue frontmatter threads a retry policy through
+> dispatch; a retryable outcome re-dispatches with exponential backoff (each
+> attempt is its own run record carrying `attempt`/`maxAttempts`) and the
+> one-shot issue stays open until the chain ends. AU-4: `calendar`
+> (`always` | `weekdays` | `us-market`) gates fires; holidays are computed
+> algorithmically in ET (fixed + observed-shift + nth-weekday + Good Friday via
+> Computus) so no per-year table is maintained. AU-7: `scanner.dryRun(days)` +
+> `GET /api/schedule/dry-run?days=N` preview planned fires with skip
+> annotations, dispatching nothing.
+> Deviations: calendar gating is DATE-level (open day), not intraday session
+> hours — the acceptance bar is weekend/holiday skips, and intraday ET windows
+> add TZ/DST complexity better handled with the market-data calendar later.
+> `no-report` is deliberately NOT retried (a clean exit that did nothing would
+> loop). Retry lives in the dispatch chain, not the scanner, so a manual run can
+> opt in later. Run-panel UI still shows `status`; surfacing `outcome`/attempt
+> chips is a follow-up (the API already returns them, demo handler added for
+> dry-run).
 
 **Objectives.** Headless runs never zombie, classify their outcomes, and
 retry sanely. (AG-2, AG-3, AG-6, AU-4, AU-7.)

@@ -56,6 +56,16 @@ The filename stem is the stable issue id. Frontmatter:
 - `what` — optional standalone headless prompt; falls back to title + body.
 - `agent` — optional CLI adapter id; otherwise Workspace/default resolution is
   used.
+- `retries` — optional extra attempts (0-5, default 0) when a fire ends
+  `error` or `timeout`. Each attempt is its own run record (`attempt` /
+  `maxAttempts`); a one-shot issue stays open until the chain ends. A clean
+  run that produced no assistant turn (`no-report`) is NOT retried.
+- `backoff` — optional base delay between retries (default `30s`); doubles
+  per attempt.
+- `calendar` — optional fire gate: `always` (default), `weekdays` (skip
+  Sat/Sun), or `us-market` (skip weekends + US market holidays). Evaluated on
+  the America/New_York calendar date; a skipped fire is not marked, so it
+  fires on the next open day.
 
 `done` and `canceled` are terminal and stop scheduled firing. There is no
 separate `enabled` flag. A successful one-shot `at` issue is automatically
@@ -99,7 +109,20 @@ run checks X and exits silently when false.
 
 The scanner persists only last-fired markers under the launcher state root.
 Schedule semantics remain in the issue file. Markers are written after a
-successful dispatch; capacity/transient rejection stays due for retry.
+successful dispatch; capacity/transient rejection stays due for retry. A
+calendar-skipped fire is likewise not marked, so it fires on the next open day.
+
+Every finished run carries a classified `outcome`:
+
+| Outcome | Meaning |
+|---|---|
+| `success` | exited cleanly and produced an assistant turn |
+| `no-report` | exited cleanly but produced no assistant turn |
+| `error` | exited non-zero |
+| `timeout` | the watchdog killed it (`killReason`: `idle` heartbeat stall, or the absolute `cap`) |
+
+`GET /api/schedule/dry-run?days=N` previews planned fires (with calendar-skip
+annotations) without dispatching anything.
 
 Headless runs may overlap with interactive sessions or other runs in the same
 checkout. Agents must tolerate concurrent edits. Global headless capacity is

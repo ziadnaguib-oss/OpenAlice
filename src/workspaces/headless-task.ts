@@ -30,6 +30,8 @@ import type { Logger } from './logger.js';
 import { resolveLaunchCommand } from './win-command.js';
 
 const KILL_GRACE_MS = 5_000;
+/** How often the watchdog re-checks the idle/cap conditions. */
+const WATCHDOG_TICK_MS = 1_000;
 const OUTPUT_TAIL_BYTES = 16 * 1024;
 const ASSISTANT_TEXT_MAX_CHARS = 64 * 1024;
 /** Scanner line buffer cap — a "line" past this without \n is not the id announcement. */
@@ -40,8 +42,15 @@ export interface HeadlessTaskArgs {
   readonly command: readonly string[];
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
-  /** Watchdog: SIGTERM at `timeoutMs`, SIGKILL after a grace window. */
+  /** Absolute cap: SIGTERM at `timeoutMs`, SIGKILL after a grace window. */
   readonly timeoutMs: number;
+  /**
+   * Heartbeat watchdog (AG-2): kill the run when NO stdout/stderr activity has
+   * arrived for this long — catches a CLI that wedged (stopped streaming) well
+   * before it would hit the absolute cap. Omitted ⇒ cap-only (pre-M3 behavior).
+   * A healthy agent emits stream-json continuously, so idle == stuck.
+   */
+  readonly idleTimeoutMs?: number;
   readonly logger: Logger;
   /**
    * Stream the FULL stdout/stderr to these files (the task log an operator can
@@ -76,6 +85,8 @@ export interface HeadlessTaskResult {
   readonly signal: NodeJS.Signals | null;
   /** True if the watchdog had to kill the process (timeout, not natural exit). */
   readonly killed: boolean;
+  /** Why the watchdog fired: 'idle' (heartbeat stall) or 'cap' (absolute cap). */
+  readonly killReason: 'idle' | 'cap' | null;
   readonly durationMs: number;
   /** Last bytes of stdout/stderr — diagnostics only; not parsed for control flow. */
   readonly stdoutTail: string;
@@ -84,6 +95,32 @@ export interface HeadlessTaskResult {
   readonly agentSessionId: string | null;
   /** Latest completed assistant reply decoded from structured stdout. */
   readonly assistantText: string | null;
+}
+
+/**
+ * The four terminal outcome classes (AG-6), derived — not vendor-coupled —
+ * from the run result the launcher already collects:
+ *   timeout   — the watchdog killed it (idle stall or absolute cap)
+ *   error     — exited non-zero on its own
+ *   success   — exited zero AND produced a real assistant turn (stream-json)
+ *   no-report — exited zero but emitted no assistant reply (nothing happened)
+ * `success` proves a model turn without parsing vendor event schemas; the
+ * launcher still never interprets the *content* (the agent reports via Inbox).
+ */
+export type HeadlessOutcome = 'success' | 'no-report' | 'error' | 'timeout';
+
+export function classifyHeadlessOutcome(
+  r: Pick<HeadlessTaskResult, 'killed' | 'exitCode' | 'assistantText'>,
+): HeadlessOutcome {
+  if (r.killed) return 'timeout';
+  if (r.exitCode !== 0) return 'error';
+  return r.assistantText ? 'success' : 'no-report';
+}
+
+/** error/timeout are transient enough to retry; success/no-report are terminal
+ *  (no-report is a clean exit — retrying a no-op just loops). */
+export function isRetryableOutcome(o: HeadlessOutcome): boolean {
+  return o === 'error' || o === 'timeout';
 }
 
 /**
@@ -189,6 +226,8 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
   let exitCode: number | null = null;
   let signal: NodeJS.Signals | null = null;
   let killed = false;
+  let killReason: 'idle' | 'cap' | null = null;
+  let lastActivity = start;
   let agentSessionId: string | null = null;
   let assistantText: string | null = null;
   const outSink = makeTailSink(OUTPUT_TAIL_BYTES);
@@ -224,6 +263,7 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
       exitCode: -1,
       signal: null,
       killed: false,
+      killReason: null,
       durationMs: Date.now() - start,
       stdoutTail: '',
       stderrTail:
@@ -245,11 +285,13 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout?.on('data', (d: Buffer) => {
+    lastActivity = Date.now();
     outSink.push(d);
     scanner?.push(d);
     outFile?.write(d);
   });
   child.stderr?.on('data', (d: Buffer) => {
+    lastActivity = Date.now();
     errSink.push(d);
     errFile?.write(d);
   });
@@ -269,29 +311,36 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
     });
   });
 
-  // Watchdog armed BEFORE the await so it covers the wait: SIGTERM at
-  // timeoutMs, SIGKILL after the grace window.
-  const softKill = setTimeout(() => {
+  // Watchdog armed BEFORE the await so it covers the wait. Two trip
+  // conditions: an idle stall (no stream activity for idleTimeoutMs) or the
+  // absolute cap (total runtime hits timeoutMs). Either fires SIGTERM, then a
+  // SIGKILL after the grace window if the child ignores the term.
+  const idleMs = args.idleTimeoutMs && args.idleTimeoutMs > 0 ? args.idleTimeoutMs : null;
+  let hardKillTimer: ReturnType<typeof setTimeout> | null = null;
+  const watchdog = setInterval(() => {
+    if (killReason) return; // already tripped; waiting on grace/close
+    const now = Date.now();
+    if (now - start >= timeoutMs) killReason = 'cap';
+    else if (idleMs && now - lastActivity >= idleMs) killReason = 'idle';
+    else return;
     killed = true;
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-  }, timeoutMs);
-  softKill.unref();
-  const hardKill = setTimeout(() => {
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      /* ignore */
-    }
-  }, timeoutMs + KILL_GRACE_MS);
-  hardKill.unref();
+    logger.warn('headless.watchdog_kill', {
+      command: argv0,
+      killReason,
+      idleForMs: now - lastActivity,
+      runtimeMs: now - start,
+    });
+    try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    hardKillTimer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+    }, KILL_GRACE_MS);
+    hardKillTimer.unref();
+  }, WATCHDOG_TICK_MS);
+  watchdog.unref();
 
   await closePromise;
-  clearTimeout(softKill);
-  clearTimeout(hardKill);
+  clearInterval(watchdog);
+  if (hardKillTimer) clearTimeout(hardKillTimer);
   scanner?.finish();
   outFile?.end();
   errFile?.end();
@@ -305,6 +354,7 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
     exitCode,
     signal,
     killed,
+    killReason,
     agentSessionId,
     assistantReply: assistantText !== null,
     stdoutBytes: stdoutTail.length,
@@ -317,6 +367,7 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
     exitCode,
     signal,
     killed,
+    killReason,
     durationMs,
     stdoutTail,
     stderrTail,
