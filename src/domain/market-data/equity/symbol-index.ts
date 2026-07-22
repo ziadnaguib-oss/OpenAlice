@@ -17,6 +17,9 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { dirname } from 'path'
 import { dataPath } from '@/core/paths.js'
 import type { EquityClientLike } from '../client/types.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'symbol-index' })
 
 // ==================== Types ====================
 
@@ -63,7 +66,7 @@ export class SymbolIndex {
     const cached = await this.readCache()
     if (cached && !this.isExpired(cached.cachedAt)) {
       this.entries = cached.entries
-      console.log(`equity: loaded ${this.entries.length} symbols from cache (${cached.sources.join(', ')})`)
+      log.info(`equity: loaded ${this.entries.length} symbols from cache (${cached.sources.join(', ')})`)
       return
     }
 
@@ -72,21 +75,21 @@ export class SymbolIndex {
       const entries = await this.fetchFromApi(client)
       this.entries = entries
       await this.writeCache(entries)
-      console.log(`equity: fetched ${entries.length} symbols from API (${SOURCES.join(', ')})`)
+      log.info(`equity: fetched ${entries.length} symbols from API (${SOURCES.join(', ')})`)
       return
     } catch (err) {
-      console.warn('equity: API fetch failed:', err)
+      log.warn('equity: API fetch failed', { err })
     }
 
     // 3. 降级到过期缓存
     if (cached) {
       this.entries = cached.entries
-      console.warn(`equity: using expired cache (${cached.cachedAt}), ${this.entries.length} symbols`)
+      log.warn(`equity: using expired cache (${cached.cachedAt}), ${this.entries.length} symbols`)
       return
     }
 
     // 4. 无缓存可用
-    console.warn('equity: no symbol data available, starting with empty index')
+    log.warn('equity: no symbol data available, starting with empty index')
   }
 
   /**
@@ -144,9 +147,9 @@ export class SymbolIndex {
             })
           }
         }
-        console.log(`equity: ${source} → ${results.length} symbols`)
+        log.info(`equity: ${source} → ${results.length} symbols`)
       } catch (err) {
-        console.warn(`equity: failed to fetch from ${source}:`, err)
+        log.warn(`equity: failed to fetch from ${source}`, { err })
       }
     }
 

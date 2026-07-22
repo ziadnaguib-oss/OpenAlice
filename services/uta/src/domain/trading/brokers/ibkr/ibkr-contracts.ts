@@ -5,7 +5,7 @@
  * no translation layer is needed. Helpers just ensure required fields are set.
  */
 
-import { Contract } from '@traderalice/ibkr'
+import type { Contract } from '@traderalice/ibkr'
 import { BrokerError, type BrokerErrorCode } from '../types.js'
 import '../../contract-ext.js'
 import { buildContract } from '../contract-builder.js'

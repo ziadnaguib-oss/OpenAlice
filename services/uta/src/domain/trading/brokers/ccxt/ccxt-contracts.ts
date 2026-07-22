@@ -6,7 +6,7 @@
  * UnifiedTradingAccount, not this layer — see `UTA.stampAliceId`.
  */
 
-import { Contract, OrderState } from '@traderalice/ibkr'
+import { type Contract, OrderState } from '@traderalice/ibkr'
 import '../../contract-ext.js'
 import type { CcxtMarket } from './ccxt-types.js'
 import { buildContract } from '../contract-builder.js'

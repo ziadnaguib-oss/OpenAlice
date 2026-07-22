@@ -12,7 +12,9 @@ export function calculate(expression: string): number {
       );
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    // Deliberate: the regex above constrains input to digits/operators/parens,
+    // so this is a contained arithmetic evaluator (no identifiers can reach it).
+    // biome-ignore lint/security/noGlobalEval: intentional sandboxed arithmetic evaluator, input regex-constrained above
     const result = eval(expression);
     if (typeof result !== 'number' || !isFinite(result)) {
       throw new Error('Invalid calculation result');

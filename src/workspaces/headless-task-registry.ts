@@ -18,8 +18,10 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { Logger } from './logger.js'
+import type { HeadlessOutcome } from './headless-task.js'
 
-export type HeadlessTaskStatus = 'running' | 'done' | 'failed' | 'interrupted'
+/** `queued` (M4) = accepted into the durable queue, not yet claimed/spawned. */
+export type HeadlessTaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'interrupted'
 
 export interface HeadlessTaskRecord {
   readonly taskId: string
@@ -42,6 +44,18 @@ export interface HeadlessTaskRecord {
   exitCode?: number | null
   signal?: string | null
   killed?: boolean
+  /** Why the watchdog killed the run, when `killed` (AG-2). */
+  killReason?: 'idle' | 'cap' | null
+  /**
+   * The classified terminal outcome (AG-6): success | no-report | error |
+   * timeout. Richer than `status` (which stays running/done/failed/interrupted
+   * for back-compat): the panel shows the outcome, the retry logic reads it.
+   */
+  outcome?: HeadlessOutcome
+  /** 1-based attempt number within a retry chain (AG-3); 1 for a first/only run. */
+  attempt?: number
+  /** Total attempts allowed for this dispatch (attempt of maxAttempts). */
+  maxAttempts?: number
   error?: string
   /**
    * The agent CLI's OWN session id, captured from the run's stdout (adapter's
@@ -99,6 +113,8 @@ export class HeadlessTaskRegistry {
   private async reconcile(): Promise<void> {
     let changed = false
     for (const t of this.tasks) {
+      // `queued` records are NOT touched: the durable queue (M4) owns their
+      // fate and re-queues or abandons them on its own boot reconcile.
       if (t.status === 'running') {
         t.status = 'interrupted'
         t.finishedAt = t.finishedAt ?? t.startedAt
@@ -108,6 +124,38 @@ export class HeadlessTaskRegistry {
     if (changed) await this.flush()
   }
 
+  /** Flip a queued record to running when the dispatch loop claims it (M4). */
+  async markRunning(taskId: string, startedAt: number): Promise<void> {
+    const rec = this.tasks.find((t) => t.taskId === taskId)
+    if (!rec || rec.status !== 'queued') return
+    rec.status = 'running'
+    ;(rec as { startedAt: number }).startedAt = startedAt
+    await this.flush()
+  }
+
+  /**
+   * Reset a record back to `queued` for the NEXT retry attempt (M4). The
+   * previous attempt already wrote a terminal record via `complete`; without
+   * this, `markRunning` (which only advances `queued → running`) would no-op on
+   * the retry and the panel would show the run as failed-and-finished while it
+   * is actually re-running. Clears the terminal fields and advances `attempt`.
+   */
+  async requeueRecord(taskId: string, attempt: number): Promise<void> {
+    const rec = this.tasks.find((t) => t.taskId === taskId)
+    if (!rec) return
+    rec.status = 'queued'
+    rec.attempt = attempt
+    delete rec.finishedAt
+    delete rec.durationMs
+    delete rec.exitCode
+    delete rec.signal
+    delete rec.killed
+    delete rec.killReason
+    delete rec.outcome
+    delete rec.error
+    await this.flush()
+  }
+
   async create(input: {
     wsId: string
     agent: string
@@ -115,16 +163,24 @@ export class HeadlessTaskRegistry {
     startedAt: number
     /** Set only when an issue fired this run (scheduled scan); omitted for manual/external runs. */
     issueId?: string
+    attempt?: number
+    maxAttempts?: number
+    /** M4: the queue supplies the id so one run has ONE id across queue + registry. */
+    taskId?: string
+    /** M4: `queued` until the dispatch loop claims it. */
+    status?: HeadlessTaskStatus
   }): Promise<HeadlessTaskRecord> {
     const rec: HeadlessTaskRecord = {
-      taskId: randomUUID(),
+      taskId: input.taskId ?? randomUUID(),
       wsId: input.wsId,
       agent: input.agent,
       prompt: input.prompt,
-      status: 'running',
+      status: input.status ?? 'running',
       startedAt: input.startedAt,
       // Keep the field absent (not `undefined`) on manual runs so the JSON stays clean.
       ...(input.issueId ? { issueId: input.issueId } : {}),
+      ...(input.attempt ? { attempt: input.attempt } : {}),
+      ...(input.maxAttempts ? { maxAttempts: input.maxAttempts } : {}),
     }
     this.tasks.push(rec)
     await this.flush()
@@ -136,7 +192,7 @@ export class HeadlessTaskRegistry {
     patch: Partial<
       Pick<
         HeadlessTaskRecord,
-        'status' | 'finishedAt' | 'durationMs' | 'exitCode' | 'signal' | 'killed' | 'error'
+        'status' | 'finishedAt' | 'durationMs' | 'exitCode' | 'signal' | 'killed' | 'killReason' | 'outcome' | 'error'
       >
     >,
   ): Promise<void> {

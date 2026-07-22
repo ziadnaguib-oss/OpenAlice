@@ -1,4 +1,5 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { rmrf } from '@/spec-helpers/fs.js';
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
@@ -19,7 +20,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'agent-detect-'));
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rmrf(dir);
 });
 
 describe('findExecutableOnPath (posix)', () => {
@@ -39,7 +40,7 @@ describe('findExecutableOnPath (posix)', () => {
       const env = { PATH: [other, dir].join(delimiter) };
       expect(findExecutableOnPath('pi', { platform: 'linux', env })).toBe(p);
     } finally {
-      await rm(other, { recursive: true, force: true });
+      await rmrf(other);
     }
   });
 

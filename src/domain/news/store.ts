@@ -15,6 +15,9 @@ import { createHash } from 'node:crypto'
 import { dirname } from 'node:path'
 import { dataPath } from '../../core/paths.js'
 import type { INewsProvider, GetNewsV2Options, NewsItem, NewsRecord } from './types.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'news' })
 
 const DEFAULT_LOG_PATH = dataPath('news-collector', 'news.jsonl')
 const DEFAULT_MAX_IN_MEMORY = 2000
@@ -113,7 +116,7 @@ export class NewsCollectorStore implements INewsProvider {
       this.buffer = this.buffer.slice(-this.maxInMemory)
     }
 
-    console.log(
+    log.info(
       `news-collector-store: recovered ${this.dedupSet.size} dedup keys, ${this.buffer.length} items in memory`,
     )
   }

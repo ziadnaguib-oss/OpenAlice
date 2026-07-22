@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { rmrf } from '@/spec-helpers/fs.js'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -11,7 +12,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'issues-decl-'))
 })
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
+  await rmrf(dir)
 })
 
 /** Write `.alice/issues/<id>.md`. */

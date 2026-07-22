@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 /**
  * PATCH /api/issues/:wsId/:id + POST /api/issues/:wsId/:id/comments — the
  * human/UI write path. Drives the routes against a stubbed WorkspaceService
@@ -5,7 +6,7 @@
  * mutation helper actually reads/writes files) and whose `issueDetail` re-reads
  * that dir through the production reader. Modeled on headless.spec's harness.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,7 +26,7 @@ beforeEach(async () => {
   wsDir = await mkdtemp(join(tmpdir(), 'issues-route-'))
 })
 afterEach(async () => {
-  await rm(wsDir, { recursive: true, force: true })
+  await rmrf(wsDir)
 })
 
 // The inbox→issue JOIN now lives in svc.issueDetail (domain) — see board.spec's

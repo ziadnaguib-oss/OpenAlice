@@ -1,5 +1,6 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,7 +26,10 @@ beforeEach(async () => {
   path = join(dir, 'tasks.json')
 })
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
+  // The registry deletes pruned tasks' log files fire-and-forget (`void rm(…)`),
+  // which can race this recursive cleanup on Windows and throw ENOTEMPTY on the
+  // parent dir. `maxRetries` makes fs.rm retry exactly this class of error.
+  await rmrf(dir)
 })
 
 describe('HeadlessTaskRegistry', () => {
@@ -45,6 +49,30 @@ describe('HeadlessTaskRegistry', () => {
     expect(reg.get(a.taskId)?.status).toBe('done')
     expect(reg.get(a.taskId)?.exitCode).toBe(0)
     expect(reg.runningCount()).toBe(0)
+  })
+
+  it('persists the classified outcome, killReason, and retry attempt (M3)', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    const a = await reg.create({
+      wsId: 'w1', agent: 'claude', prompt: 'scan', startedAt: 1, issueId: 'daily', attempt: 2, maxAttempts: 3,
+    })
+    expect(a.attempt).toBe(2)
+    expect(a.maxAttempts).toBe(3)
+    await reg.complete(a.taskId, {
+      status: 'failed', outcome: 'timeout', killed: true, killReason: 'idle', finishedAt: 2,
+    })
+    const reloaded = await HeadlessTaskRegistry.load(path, noopLogger)
+    const rec = reloaded.get(a.taskId)
+    expect(rec?.outcome).toBe('timeout')
+    expect(rec?.killReason).toBe('idle')
+    expect(rec?.attempt).toBe(2)
+  })
+
+  it('omits retry fields on a plain (non-retrying) run so the JSON stays clean', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    const a = await reg.create({ wsId: 'w1', agent: 'claude', prompt: 'x', startedAt: 1 })
+    expect('attempt' in a).toBe(false)
+    expect('maxAttempts' in a).toBe(false)
   })
 
   it('list filters by wsId / status / limit', async () => {
@@ -99,6 +127,63 @@ describe('HeadlessTaskRegistry', () => {
     const reloaded = await HeadlessTaskRegistry.load(path, noopLogger)
     expect(reloaded.runningCount()).toBe(0)
     expect(reloaded.list()[0]?.status).toBe('interrupted')
+  })
+
+  it('M4: create with status queued + explicit taskId keeps one id across queue and registry', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    const a = await reg.create({ wsId: 'w1', agent: 'claude', prompt: 'x', startedAt: 1, taskId: 'task-42', status: 'queued' })
+    expect(a.taskId).toBe('task-42')
+    expect(a.status).toBe('queued')
+    expect(reg.runningCount()).toBe(0) // queued is not running
+    expect(reg.list({ status: 'queued' }).map((t) => t.taskId)).toEqual(['task-42'])
+  })
+
+  it('M4: markRunning flips queued → running, but no-ops on any other status', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    const q = await reg.create({ wsId: 'w1', agent: 'claude', prompt: 'x', startedAt: 1, taskId: 'q', status: 'queued' })
+    await reg.markRunning('q', 99)
+    expect(reg.get('q')?.status).toBe('running')
+    expect(reg.get('q')?.startedAt).toBe(99)
+    // A second markRunning (already running) must NOT reset startedAt.
+    await reg.markRunning('q', 500)
+    expect(reg.get('q')?.startedAt).toBe(99)
+    // markRunning on a terminal record is a no-op.
+    await reg.complete('q', { status: 'done', finishedAt: 2 })
+    await reg.markRunning('q', 777)
+    expect(reg.get('q')?.status).toBe('done')
+    void q
+  })
+
+  it('M4: requeueRecord resets a failed record to queued, advances attempt, and clears terminal fields (QA H-1)', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    await reg.create({ wsId: 'w1', agent: 'claude', prompt: 'x', startedAt: 1, taskId: 'r', status: 'queued', attempt: 1, maxAttempts: 3 })
+    await reg.markRunning('r', 10)
+    await reg.complete('r', { status: 'failed', outcome: 'error', exitCode: 1, durationMs: 5, finishedAt: 20, killed: false, killReason: 'idle' })
+    expect(reg.get('r')?.status).toBe('failed')
+
+    await reg.requeueRecord('r', 2)
+    const rec = reg.get('r')!
+    expect(rec.status).toBe('queued')
+    expect(rec.attempt).toBe(2)
+    // Every terminal field from the prior attempt must be gone, not stale.
+    expect(rec.finishedAt).toBeUndefined()
+    expect(rec.durationMs).toBeUndefined()
+    expect(rec.exitCode).toBeUndefined()
+    expect(rec.outcome).toBeUndefined()
+    expect(rec.killReason).toBeUndefined()
+    expect(rec.error).toBeUndefined()
+    // The clean state survives a reload (durable, not just in-memory).
+    const reloaded = await HeadlessTaskRegistry.load(path, noopLogger)
+    expect(reloaded.get('r')?.status).toBe('queued')
+    expect(reloaded.get('r')?.attempt).toBe(2)
+  })
+
+  it('M4: boot reconcile leaves a queued record untouched (the durable queue owns it)', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    await reg.create({ wsId: 'w1', agent: 'claude', prompt: 'x', startedAt: 1, taskId: 'still-queued', status: 'queued' })
+    const reloaded = await HeadlessTaskRegistry.load(path, noopLogger)
+    // running → interrupted, but queued stays queued (not flipped to interrupted).
+    expect(reloaded.get('still-queued')?.status).toBe('queued')
   })
 
   it('setAgentSessionId records the id mid-run and persists across reload', async () => {

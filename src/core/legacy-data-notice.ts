@@ -36,6 +36,8 @@ export function legacyDataNoticeLines(opts?: { cwd?: string }): string[] {
 export function printLegacyDataNotice(prefix = '[openalice]'): boolean {
   const lines = legacyDataNoticeLines()
   if (lines.length === 0) return false
-  for (const line of lines) console.warn(`${prefix} ${line}`)
+  // User-facing operator notice, not a log record — raw stderr keeps it
+  // readable (the structured logger would JSON-wrap each line).
+  process.stderr.write(lines.map((line) => `${prefix} ${line}`).join('\n') + '\n')
   return true
 }

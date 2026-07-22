@@ -13,8 +13,17 @@ export {
   verifyToken,
   getTokenInfo,
   clearToken,
+  listApiTokens,
+  mintApiToken,
+  revokeApiToken,
+  verifyApiToken,
+  normalizeAuthFileToV2,
   type TokenInfo,
+  type ApiTokenRecord,
 } from './token-store.js'
+
+export { TOKEN_SCOPES, isTokenScope, scopesSatisfy, type TokenScope } from './scopes.js'
+export { createAuthRateLimiter, type AuthRateLimiter, type RateLimitConfig } from './rate-limit.js'
 
 export {
   createSession,

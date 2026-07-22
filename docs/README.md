@@ -10,6 +10,8 @@ GitHub navigation.
 | Wikilink route | Guide | Owns |
 |---|---|---|
 | [[docs/project-structure.md]] | [Project structure](project-structure.md) | Process boundaries, source ownership, state roots, architectural entry points |
+| [[docs/architecture.md]] | [Architecture reference](architecture.md) | Cross-cutting onboarding map: topology, startup sequences, tool system, flows (request/agent/provider/config), extension points, anti-patterns, and change-with-care invariants |
+| [[docs/local-development.md]] | [Local development](local-development.md) | Toolchain prerequisites, install/dev-loop mechanics, agent-CLI auth (Claude subscription login), sandboxed installs, troubleshooting |
 | [[docs/development-workflow.md]] | [Development workflow](development-workflow.md) | Branches, delivery modes, PRs, promotions, external review, risk gates |
 | [[docs/managed-workspace-runtime.md]] | [Managed Workspace runtime](managed-workspace-runtime.md) | Electron packaging, managed Pi, PortableGit/Bash, runtime profile, Workspace PATH |
 | [[docs/workspace-issues-and-scheduling.md]] | [Workspace issues and scheduling](workspace-issues-and-scheduling.md) | Markdown issue contract, global board, schedule scanner, headless execution, Inbox delivery |
@@ -19,7 +21,14 @@ GitHub navigation.
 | [[docs/mcp-ask-connector.md]] | [MCP Ask retirement note](mcp-ask-connector.md) | Historical redirect for the removed connector/chat architecture |
 
 Other files under `docs/images/` are README/product assets rather than owner
-guides.
+guides. [`docs/roadmap.md`](roadmap.md), [`docs/ai-os-design.md`](ai-os-design.md),
+[`docs/knowledge-system.md`](knowledge-system.md),
+[`docs/multi-agent.md`](multi-agent.md), and
+[`docs/implementation-plan.md`](implementation-plan.md) are forward-looking
+planning surfaces — direction, candidate work, and target-state design, not
+durable subsystem truth; current code always overrides them.
+[`docs/baseline-quality-gate.md`](baseline-quality-gate.md) is a point-in-time
+release-readiness record for the `v0.1-foundation` baseline.
 
 ## Maintenance Rule
 

@@ -86,16 +86,17 @@ describe('runMigrations', () => {
       makeMigration('0003_c'),
     ]
 
-    const consoleErrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    // Suppress the structured logger's stream output (M1: pino → stdout/stderr).
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
     await expect(runMigrations({ ctx, registry, snapshot: async () => null }))
       .rejects.toThrow('boom')
 
     const meta = readMeta(files)!
     expect(meta.appliedMigrations.map(m => m.id)).toEqual(['0001_a']) // 0002 NOT recorded
-    consoleErrSpy.mockRestore()
-    consoleLogSpy.mockRestore()
+    errSpy.mockRestore()
+    outSpy.mockRestore()
   })
 
   it('idempotent: second run is a no-op when nothing pending', async () => {

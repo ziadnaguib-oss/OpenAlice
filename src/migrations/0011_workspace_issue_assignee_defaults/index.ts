@@ -18,6 +18,9 @@ import { dirname, join, resolve } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
 import type { Migration } from '../types.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'migrations' })
 
 function defaultLauncherRoot(): string {
   return resolve(process.env['AQ_LAUNCHER_ROOT'] ?? join(homedir(), '.openalice', 'workspaces'))
@@ -113,13 +116,13 @@ export async function migrateWorkspaceIssueAssigneeDefaults(
       try {
         if (await normalizeIssueFile(join(issuesDir, file))) touched++
       } catch (err) {
-        console.log(`[migration 0011] skipped ${join(issuesDir, file)}: ${err instanceof Error ? err.message : String(err)}`)
+        log.info(`[migration 0011] skipped ${join(issuesDir, file)}: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
     if (touched > 0) {
       updated += touched
       touchedWorkspaces++
-      console.log(`[migration 0011] ${dir}: normalized ${touched} issue assignee default(s)`)
+      log.info(`[migration 0011] ${dir}: normalized ${touched} issue assignee default(s)`)
     }
   }
   return { updated, workspaces: touchedWorkspaces }

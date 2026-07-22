@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, readFile, readdir, rm, stat, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -31,7 +32,7 @@ afterEach(async () => {
   if (savedHome === undefined) delete process.env['OPENALICE_HOME']
   else process.env['OPENALICE_HOME'] = savedHome
   vi.resetModules()
-  await rm(home, { recursive: true, force: true })
+  await rmrf(home)
 })
 
 const ACCOUNT = {
@@ -81,10 +82,12 @@ describe('UTA accounts at-rest sealing', () => {
     await config.writeUTAsConfig([ACCOUNT] as never)
     await rm(join(home, 'sealing.key')) // simulate data/ copied to a machine without the key
 
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The structured logger routes error records to stderr (M1).
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     try {
       expect(await config.readUTAsConfig()).toEqual([])
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('could not be unsealed'))
+      const stderrOut = errSpy.mock.calls.map((c) => String(c[0])).join('')
+      expect(stderrOut).toContain('could not be unsealed')
     } finally {
       errSpy.mockRestore()
     }

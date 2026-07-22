@@ -1,15 +1,16 @@
+import { rmrf } from '@/spec-helpers/fs.js';
 /**
  * POST /:id/headless — the automation dispatch route. Covers the validation /
  * agent-resolution / dispatch branches against a stubbed WorkspaceService
  * (no real spawn). Modeled on trading-config.spec's harness.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createWorkspaceRoutes } from './workspaces.js';
-import { HeadlessCapacityError, type WorkspaceService } from '../../workspaces/service.js';
+import type { WorkspaceService } from '../../workspaces/service.js';
 import { readWorkspaceMetadata } from '../../workspaces/workspace-metadata.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -138,7 +139,7 @@ describe('PATCH /:id/metadata', () => {
       const readBack = await readWorkspaceMetadata(dir);
       expect(readBack).toEqual({ ok: true, metadata: { displayName: 'AAPL earnings review' } });
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rmrf(dir);
     }
   });
 
@@ -153,7 +154,7 @@ describe('PATCH /:id/metadata', () => {
       expect(r.body.workspace.tag).toBe('stable-tag');
       expect(r.body.workspace.displayName).toBe('Nice label');
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rmrf(dir);
     }
   });
 });
@@ -248,12 +249,14 @@ describe('POST /:id/headless', () => {
     expect(dispatchHeadlessTask).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'x', 300_000);
   });
 
-  it('async by default → 202 + taskId, dispatches in the background', async () => {
+  it('async by default → 202 + taskId, enqueues onto the durable queue', async () => {
     const { app, dispatchHeadlessTask, runHeadlessTask } = build();
     const r = await post(app, '/ws-1/headless', { prompt: 'do the thing' });
     expect(r.status).toBe(202);
     expect(r.body.taskId).toBe('task-1');
-    expect(r.body.status).toBe('running');
+    // M4: the manual run is enqueued, not spawned inline — its lifecycle
+    // starts at `queued` and the dispatch loop later flips it to running.
+    expect(r.body.status).toBe('queued');
     expect(dispatchHeadlessTask).toHaveBeenCalledOnce();
     expect(runHeadlessTask).not.toHaveBeenCalled(); // async path doesn't await the run
   });
@@ -267,15 +270,9 @@ describe('POST /:id/headless', () => {
     expect(dispatchHeadlessTask).not.toHaveBeenCalled();
   });
 
-  it('429 when the concurrency cap is hit', async () => {
-    const dispatch = vi.fn(async () => {
-      throw new HeadlessCapacityError(8);
-    });
-    const { app } = build({ dispatch });
-    const r = await post(app, '/ws-1/headless', { prompt: 'x' });
-    expect(r.status).toBe(429);
-    expect(r.body.error).toBe('capacity');
-  });
+  // M4 removed the synchronous 429/capacity path: dispatch now enqueues onto
+  // the durable queue and never throws HeadlessCapacityError, so back-pressure
+  // is expressed by tasks sitting in `queued`, not by a rejected request.
 });
 
 describe('POST /:id/headless/:taskId/session', () => {
@@ -408,7 +405,7 @@ describe('POST /:id/sessions/:sid/resume — concurrent coalescing (ANG-120)', (
       startedAt: 1,
       waitForFirstExit: vi.fn(async () => null), // stays up
     };
-    let live: unknown = undefined; // what pool.get returns; set once spawned
+    let live: unknown ; // what pool.get returns; set once spawned
     const spawn = vi.fn(() => {
       live = session;
       return session;

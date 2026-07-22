@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import { readFile } from 'node:fs/promises';
-import { join, resolve as resolvePath } from 'node:path';
+import { join, } from 'node:path';
 
 import { probeByWireShape } from '../../workspaces/agent-probe.js';
 import type { WireShape } from '../../ai-providers/preset-catalog.js';
@@ -26,7 +26,7 @@ import { logger as launcherLogger } from '../../workspaces/logger.js';
 import { readWorkspaceMetadata, workspaceMetadataSchema, writeWorkspaceMetadata } from '../../workspaces/workspace-metadata.js';
 import type { SessionRecord } from '../../workspaces/session-registry.js';
 import type { WorkspaceMeta } from '../../workspaces/workspace-registry.js';
-import { HeadlessCapacityError, resumeFromRecord, type SessionFactoryContext, type WorkspaceService } from '../../workspaces/service.js';
+import { resumeFromRecord, type SessionFactoryContext, type WorkspaceService } from '../../workspaces/service.js';
 import { isAgentRuntime, type WorkspaceAiCred } from '../../workspaces/cli-adapter.js';
 import { generatePetnameId } from '../../workspaces/petname-id.js';
 import { addCredential, readCredentials, readWorkspaceDefaultAgent, setCredentialLastModel, credentialWires, credentialWireShapeEnum, type Credential } from '../../core/config.js';
@@ -1344,12 +1344,11 @@ export function createWorkspaceRoutes(
     // run's status is queryable at GET /api/headless/:taskId; the agent reports
     // its actual result via the Inbox.
     try {
+      // Enqueued into the durable queue (M4) — it may run immediately or wait
+      // behind lane/global capacity, so it starts life `queued`, not `running`.
       const { taskId } = await svc.dispatchHeadlessTask(meta, adapter, prompt, timeoutMs);
-      return c.json({ taskId, status: 'running' }, 202);
+      return c.json({ taskId, status: 'queued' }, 202);
     } catch (err) {
-      if (err instanceof HeadlessCapacityError) {
-        return c.json({ error: 'capacity', message: err.message }, 429);
-      }
       if (err instanceof AgentCredentialError) {
         return c.json(err.toBody(), 400);
       }

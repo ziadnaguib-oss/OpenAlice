@@ -9,7 +9,7 @@ import { SeriesCard } from '../components/market/SeriesCard'
 import { MeasuredChartFrame } from '../components/MeasuredChartFrame'
 import {
   referenceApi,
-  type MoversBoard, type MoverRow, type ReferenceMeta, type CalendarBoard,
+  type MoversBoard, type MoverRow, type CalendarBoard,
   type MacroBoard, type MacroSeriesCard, type TermStructureBoard, type TermCurve,
   type GlobalMacroBoard, type GlobalMacroCell, type ShippingBoard, type ShippingCurve,
   type FedBoard,

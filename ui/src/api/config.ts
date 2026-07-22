@@ -1,5 +1,5 @@
 import { headers } from './client'
-import type { AppConfig, Profile, Preset, Credential, SdkAdapterInfo, WireShape } from './types'
+import type { AppConfig, Preset, WireShape } from './types'
 
 export const configApi = {
   async load(): Promise<AppConfig> {

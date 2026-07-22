@@ -54,6 +54,51 @@ const demoOutput = (taskId: string): HeadlessOutput | null => {
 }
 
 export const headlessHandlers = [
+  // GET /api/headless/queue — durable queue state (M4). Registered first so it
+  // is not shadowed by the /:taskId handler below.
+  http.get('/api/headless/queue', () =>
+    HttpResponse.json({
+      pending: [
+        {
+          id: 'q-pending-1',
+          source: 'schedule',
+          wsId: 'ws-demo',
+          agent: 'claude',
+          prompt: 'Run the daily market scan',
+          issueId: 'daily-market-scan',
+          lane: '',
+          priority: 30,
+          attempt: 1,
+          maxAttempts: 2,
+          backoffMs: 30000,
+          timeoutMs: 1800000,
+          notBefore: 0,
+          createdAt: Date.now() - 60000,
+        },
+      ],
+      running: [
+        {
+          id: 'q-running-1',
+          source: 'manual',
+          wsId: 'ws-demo',
+          agent: 'codex',
+          prompt: 'Summarize yesterday’s fills',
+          lane: '',
+          priority: 10,
+          attempt: 1,
+          maxAttempts: 1,
+          backoffMs: 30000,
+          timeoutMs: 1800000,
+          notBefore: 0,
+          createdAt: Date.now() - 120000,
+          claimedAt: Date.now() - 110000,
+          claimedByPid: 4242,
+        },
+      ],
+      lanes: { globalConcurrency: 8, perWorkspaceSerial: true, lanes: {} },
+    }),
+  ),
+
   http.get('/api/headless', ({ request }) => {
     const wsId = new URL(request.url).searchParams.get('wsId')
     const tasks = wsId ? demoHeadlessTasks.filter((t) => t.wsId === wsId) : demoHeadlessTasks

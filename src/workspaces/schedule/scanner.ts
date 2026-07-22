@@ -26,11 +26,14 @@
  */
 
 import { computeNextRun, type Schedule } from '../../core/schedule-expr.js'
+import { parseDuration } from '../../core/duration.js'
 import type { CliAdapter } from '../cli-adapter.js'
 import type { Logger } from '../logger.js'
 import type { WorkspaceMeta, WorkspaceRegistry } from '../workspace-registry.js'
 
-import { isFireable, issueFirePrompt, readWorkspaceIssues } from '../issues/declaration.js'
+import { isFireable, issueFirePrompt, readWorkspaceIssues, type IssueRecord } from '../issues/declaration.js'
+import { calendarSkipReason, etDateOf } from './market-calendar.js'
+import { PRIORITY } from '../queue/types.js'
 
 import {
   fireBase,
@@ -40,9 +43,42 @@ import {
   type ScheduleSnapshotWorkspace,
 } from './declaration.js'
 
+export interface DryRunFire {
+  /** Planned fire time (epoch ms). */
+  at: number
+  /** True when the calendar gate would skip this fire. */
+  skipped: boolean
+  skipReason?: string
+}
+export interface DryRunIssue {
+  id: string
+  title: string
+  calendar: string
+  retries: number
+  fires: DryRunFire[]
+  /** True when the horizon holds more fires than the per-issue cap returned —
+   *  the plan is a prefix, not the whole picture. */
+  truncated: boolean
+}
+export interface DryRunWorkspace {
+  wsId: string
+  tag: string
+  issues: DryRunIssue[]
+}
+export interface ScheduleDryRun {
+  generatedAt: number
+  days: number
+  workspaces: DryRunWorkspace[]
+}
+
 export const DEFAULT_INTERVAL_MS = 60_000
-/** Matches the legacy cron-router's headless dispatch timeout. */
+/** Absolute cap for a scheduled headless run (matches the legacy cron-router). */
 const RUN_TIMEOUT_MS = 30 * 60_000
+/** Heartbeat idle cap (AG-2): a scheduled run streaming nothing for this long
+ *  is wedged. Well under RUN_TIMEOUT_MS so a stall is caught early. */
+const RUN_IDLE_TIMEOUT_MS = 5 * 60_000
+/** Dry-run horizon guard: never enumerate more than this per issue. */
+const DRYRUN_MAX_FIRES = 50
 
 /** The slice of ScheduleMarkerStore the scanner needs (structural, for testing). */
 export interface MarkerStore {
@@ -64,6 +100,17 @@ export interface ScheduleScannerDeps {
      *  its real run history. The scanner ALWAYS passes it (it only fires from an
      *  issue); manual/external dispatch callers omit it. */
     issueId?: string,
+    /** Retry policy, heartbeat cap and queue placement threaded from the
+     *  issue's frontmatter (M3 + M4). */
+    dispatchOpts?: {
+      retry?: { attempt: number; maxAttempts: number; backoffMs: number }
+      idleTimeoutMs?: number
+      lane?: string
+      priority?: number
+      source?: 'manual' | 'schedule' | 'chain' | 'webhook'
+      dependsOn?: string[]
+      chain?: { onSuccess?: string; onFailure?: string }
+    },
   ) => Promise<{ taskId: string }>
   markers: MarkerStore
   logger: Logger
@@ -79,6 +126,14 @@ export class ScheduleScanner {
   private scanning = false
   /** Snapshot built as a side-effect of each scan; null until the first scan. */
   private lastSnapshot: ScheduleSnapshot | null = null
+  /**
+   * Dedupe key -> "<ET date>:<reason>" for the last calendar skip we LOGGED.
+   * A calendar-skipped fire deliberately leaves the marker unset, so the issue
+   * stays due and would otherwise re-log every tick (1,440 lines/day/issue,
+   * which also flushes the crash-bundle log ring). Logging only on change
+   * yields one line per issue per closed day. Pruned with the markers.
+   */
+  private readonly skipLogged = new Map<string, string>()
   private readonly now: () => number
   private readonly intervalMs: number
 
@@ -142,6 +197,11 @@ export class ScheduleScanner {
         this.deps.registry.list().map((ws) => this.scanWorkspace(ws, nowMs, seen)),
       )
       await this.deps.markers.prune(seen)
+      // Same lifetime as the markers: an issue that no longer exists must not
+      // pin a dedupe entry forever.
+      for (const key of this.skipLogged.keys()) {
+        if (!seen.has(key)) this.skipLogged.delete(key)
+      }
       this.lastSnapshot = { workspaces }
     } finally {
       this.scanning = false
@@ -186,7 +246,24 @@ export class ScheduleScanner {
       if (!when) continue
       seen.add(this.deps.markers.key(ws.id, issue.id))
       if (isFireable(issue) && this.isDue(ws.id, issue.id, when, nowMs)) {
-        await this.fire(ws, issue.id, issueFirePrompt(issue), issue.agent, nowMs)
+        // Calendar gate (AU-4): a due fire on a closed market day is SKIPPED
+        // (not marked) so it fires on the next open day. Logged only when due,
+        // so a daily schedule logs at most one skip per closed day.
+        const skip = calendarSkipReason(issue.calendar, nowMs)
+        if (skip) {
+          // Log once per issue per closed day, not once per tick (see skipLogged).
+          const key = this.deps.markers.key(ws.id, issue.id)
+          const et = etDateOf(nowMs)
+          const stamp = `${et.year}-${et.month}-${et.day}:${skip}`
+          if (this.skipLogged.get(key) !== stamp) {
+            this.skipLogged.set(key, stamp)
+            this.deps.logger.info('schedule.calendar_skip', {
+              wsId: ws.id, taskId: issue.id, calendar: issue.calendar, reason: skip,
+            })
+          }
+        } else {
+          await this.fire(ws, issue, issueFirePrompt(issue), nowMs)
+        }
       }
       // Read the marker AFTER any fire so last/next reflect a just-fired run.
       const last = this.deps.markers.get(ws.id, issue.id) ?? null
@@ -201,22 +278,97 @@ export class ScheduleScanner {
     return next !== null && next <= nowMs
   }
 
+  /**
+   * Compute the planned fires over the next `days` days WITHOUT executing
+   * anything (AU-7). Each fire is annotated with whether the calendar would
+   * skip it, so the operator can preview "what will run, and when". Read-only:
+   * touches no markers, dispatches nothing.
+   */
+  async dryRun(days: number, nowMs: number = this.now()): Promise<ScheduleDryRun> {
+    const horizonMs = nowMs + Math.max(0, days) * 24 * 60 * 60 * 1000
+    const workspaces: DryRunWorkspace[] = []
+    for (const ws of this.deps.registry.list()) {
+      let res
+      try {
+        res = await readWorkspaceIssues(ws.dir)
+      } catch {
+        continue
+      }
+      if (!res.ok) continue
+      const issues: DryRunIssue[] = []
+      for (const issue of res.issues) {
+        if (!issue.when || !isFireable(issue)) continue
+        const fires: DryRunFire[] = []
+        // Forward preview: walk future occurrences strictly after `now` (NOT
+        // the due-detection baseline, which sits in the past to make a fresh
+        // schedule fire on first sight).
+        let cursor = nowMs
+        let truncated = false
+        for (let i = 0; i < DRYRUN_MAX_FIRES; i++) {
+          const next = computeNextRun(issue.when, cursor)
+          if (next === null || next > horizonMs) break
+          const skip = calendarSkipReason(issue.calendar, next)
+          fires.push({ at: next, skipped: skip !== null, ...(skip ? { skipReason: skip } : {}) })
+          cursor = next
+          if (fires.length === DRYRUN_MAX_FIRES) {
+            // One more occurrence inside the horizon ⇒ the plan is a prefix.
+            const more = computeNextRun(issue.when, cursor)
+            truncated = more !== null && more <= horizonMs
+          }
+        }
+        if (fires.length > 0) {
+          issues.push({
+            id: issue.id,
+            title: issue.title,
+            calendar: issue.calendar,
+            retries: issue.retries,
+            fires,
+            truncated,
+          })
+        }
+      }
+      if (issues.length > 0) workspaces.push({ wsId: ws.id, tag: ws.tag, issues })
+    }
+    return { generatedAt: nowMs, days, workspaces }
+  }
+
   private async fire(
     ws: WorkspaceMeta,
-    taskId: string,
+    issue: IssueRecord,
     what: string,
-    agentId: string | undefined,
     nowMs: number,
   ): Promise<void> {
-    const adapter = await this.deps.resolveAdapter(ws, agentId)
+    const taskId = issue.id
+    const adapter = await this.deps.resolveAdapter(ws, issue.agent)
     if (!adapter.capabilities.headless || !adapter.composeHeadlessCommand) {
       this.deps.logger.warn('schedule.adapter_not_headless', { wsId: ws.id, taskId, agent: adapter.id })
       return
     }
+    // Retry policy (AG-3) from the issue frontmatter. A bad `backoff` duration
+    // falls back to 30s rather than failing the fire.
+    const backoffMs = parseDuration(issue.backoff) ?? 30_000
+    const dispatchOpts = {
+      idleTimeoutMs: RUN_IDLE_TIMEOUT_MS,
+      ...(issue.retries > 0
+        ? { retry: { attempt: 1, maxAttempts: issue.retries + 1, backoffMs } }
+        : {}),
+      // Queue placement (M4). A scheduled fire is cron-priority; lane/deps/chain
+      // come straight from the issue declaration.
+      priority: PRIORITY.cron,
+      source: 'schedule' as const,
+      ...(issue.lane ? { lane: issue.lane } : {}),
+      // Drop a self-reference — an issue depending on itself would deadlock
+      // (its own status is never terminal while it is trying to run).
+      ...(() => {
+        const deps = issue.depends_on.filter((d) => d !== issue.id)
+        return deps.length > 0 ? { dependsOn: deps } : {}
+      })(),
+      ...(issue.chain ? { chain: issue.chain } : {}),
+    }
     try {
       // `taskId` here is the firing ISSUE's id (keyed by filename stem) — thread
       // it so the run records which issue triggered it.
-      const { taskId: runId } = await this.deps.dispatch(ws, adapter, what, RUN_TIMEOUT_MS, taskId)
+      const { taskId: runId } = await this.deps.dispatch(ws, adapter, what, RUN_TIMEOUT_MS, taskId, dispatchOpts)
       await this.deps.markers.set(ws.id, taskId, nowMs)
       this.deps.logger.info('schedule.fired', { wsId: ws.id, taskId, agent: adapter.id, runId })
     } catch (err) {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { type AssetClass, type BarSourceCandidate } from '../api/market'
+import type { AssetClass, BarSourceCandidate } from '../api/market'
 import { useAssetSearch } from './market/useAssetSearch'
 import { useWorkspace } from '../tabs/store'
 import { useWatchlist } from '../tabs/watchlist-store'

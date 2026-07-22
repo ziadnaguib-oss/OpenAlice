@@ -88,6 +88,28 @@ export const issueFrontmatterSchema = z.object({
   what: z.string().min(1).optional(),
   /** Which agent runtime to run the scheduled fire with; omitted uses the issue default / workspace default / first runtime. */
   agent: z.string().min(1).optional(),
+  /** Retry the scheduled run on a failed outcome (error/timeout) up to N extra
+   *  attempts, with exponential backoff (AG-3). 0 (default) = no retry. */
+  retries: z.number().int().min(0).max(5).default(0),
+  /** Base backoff duration between retries (e.g. "30s", "2m"); doubles each
+   *  attempt. Only meaningful with `retries` > 0. */
+  backoff: z.string().min(1).default('30s'),
+  /** Calendar gate for scheduled fires (AU-4): skip weekends / US-market
+   *  holidays. Default 'always' preserves prior behavior. */
+  calendar: z.enum(['always', 'weekdays', 'us-market']).default('always'),
+  /** Issue ids in THIS workspace that must be terminal before this issue's
+   *  run may be claimed (M4). Unknown ids are treated as satisfied. */
+  depends_on: z.array(z.string().min(1)).default([]),
+  /** Queue lane; empty uses the per-workspace serial lane. A shared lane name
+   *  lets several issues run in parallel under one budget (fan-out). */
+  lane: z.string().min(1).optional(),
+  /** Follow-up issue ids to enqueue when this issue's run finishes (M4). */
+  chain: z
+    .object({
+      onSuccess: z.string().min(1).optional(),
+      onFailure: z.string().min(1).optional(),
+    })
+    .optional(),
 })
 export type IssueFrontmatter = z.infer<typeof issueFrontmatterSchema>
 
@@ -226,7 +248,7 @@ export function parseIssueContent(
       id,
       ...parsed.data,
       body: split.body,
-      assigneeDefaulted: !Object.prototype.hasOwnProperty.call(rawFrontmatter, 'assignee'),
+      assigneeDefaulted: !Object.hasOwn(rawFrontmatter, 'assignee'),
     },
   }
 }

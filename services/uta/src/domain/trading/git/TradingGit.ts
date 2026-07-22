@@ -6,7 +6,7 @@
 
 import { createHash } from 'crypto'
 import Decimal from 'decimal.js'
-import { Contract, Order, UNSET_DECIMAL, UNSET_DOUBLE } from '@traderalice/ibkr'
+import { type Contract, Order, UNSET_DECIMAL, UNSET_DOUBLE } from '@traderalice/ibkr'
 import { OrderHelper } from '../OrderHelper.js'
 import type { ITradingGit, TradingGitConfig } from './interfaces.js'
 import type {

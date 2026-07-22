@@ -20,6 +20,9 @@ import { fileURLToPath } from 'node:url'
 import type { Migration, MigrationContext, ConfigMeta } from './types.js'
 import { REGISTRY } from './registry.js'
 import { dataPath } from '@/core/paths.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'migrations' })
 
 const CONFIG_DIR = dataPath('config')
 const BACKUP_DIR = dataPath('_backup')
@@ -141,11 +144,11 @@ export async function runMigrations(opts: RunnerOpts = {}): Promise<void> {
       })
       meta.appVersion = getAppVersion()
       await writeMeta(ctx, meta)
-      console.log(
+      log.info(
         `[migration] applied ${m.id} (snapshot: ${snapshotPath ?? '<no prior config>'})`,
       )
     } catch (err) {
-      console.error(
+      log.error(
         `[migration] FAILED ${m.id} — data may be in partial state. ` +
         `Snapshot: ${snapshotPath ?? '<none>'}. Error: ${err instanceof Error ? err.message : String(err)}`,
       )

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { type BarSourceCandidate, type AssetClass } from '../../api/market'
+import type { BarSourceCandidate, AssetClass } from '../../api/market'
 import { useAssetSearch } from './useAssetSearch'
 
 const ASSET_CLASS_COLORS: Record<string, string> = {

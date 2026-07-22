@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -28,7 +29,7 @@ afterEach(async () => {
   if (savedHome === undefined) delete process.env['OPENALICE_HOME']
   else process.env['OPENALICE_HOME'] = savedHome
   vi.resetModules()
-  await rm(home, { recursive: true, force: true })
+  await rmrf(home)
 })
 
 describe('seal / unseal', () => {

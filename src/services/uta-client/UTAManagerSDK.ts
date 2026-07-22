@@ -28,6 +28,9 @@ import type { ContractDescription, Contract, ContractDetails } from '@traderalic
 import type { ReconnectResult } from '../../core/types.js'
 import { triggerUTARestart } from '../uta-supervisor/restart-trigger.js'
 import { UTAAccountSDK, NotImplementedInSDK } from './UTAAccountSDK.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'uta-client' })
 
 export interface UTAManagerSDKDeps {
   client: UTAClient
@@ -190,7 +193,7 @@ export class UTAManagerSDK {
     await triggerUTARestart().catch((err) => {
       // Best-effort — config-route caller has already deleted from disk;
       // not blocking the response on UTA respawn completion.
-      console.warn('[uta-sdk] removeUTA restart trigger failed:', err instanceof Error ? err.message : err)
+      log.warn('[uta-sdk] removeUTA restart trigger failed:', err instanceof Error ? err.message : err)
     })
   }
 

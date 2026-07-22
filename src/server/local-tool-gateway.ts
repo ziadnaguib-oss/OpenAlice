@@ -19,6 +19,9 @@ import type { IInboxStore } from '../core/inbox-store.js'
 import type { IEntityStore } from '../core/entity-store.js'
 import type { WorkspaceService } from '../workspaces/service.js'
 import { registerCliRoutes } from './cli.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'tool-gateway' })
 
 export interface LocalToolGatewayDeps {
   readonly toolCenter: ToolCenter
@@ -50,7 +53,7 @@ export class LocalToolGatewayPlugin implements Plugin {
     }))
     mountLocalToolGateway(app, this.deps)
     this.server = serve({ fetch: app.fetch, port: this.port, hostname: '127.0.0.1' }, (info) => {
-      console.log(`local tool gateway listening on http://127.0.0.1:${info.port}/cli`)
+      log.info(`local tool gateway listening on http://127.0.0.1:${info.port}/cli`)
     })
   }
 

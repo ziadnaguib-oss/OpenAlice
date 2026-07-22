@@ -17,7 +17,7 @@
  */
 
 import { Contract } from '@traderalice/ibkr'
-import Decimal from 'decimal.js'
+import type Decimal from 'decimal.js'
 import type { Position, PositionRisk } from './types.js'
 import { assertContract, type SecType } from '../contract-discipline.js'
 import { derivePositionMath } from '../position-math.js'

@@ -16,7 +16,7 @@ describe('resolveGuardianTradingMode', () => {
   })
 
   afterEach(async () => {
-    await rm(home, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 
   const writeConfig = async (name: string, value: unknown) => {

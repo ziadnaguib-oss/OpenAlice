@@ -60,7 +60,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await rm(home, { recursive: true, force: true })
+  await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
 })
 
 describe('runtime lock ownership', () => {
@@ -308,7 +308,7 @@ describe('runtime lock ownership', () => {
       processController: controller,
       onOwnershipLost: (err) => { ownershipError = err },
     })
-    await rm(lockDir, { recursive: true, force: true })
+    await rm(lockDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     await new Promise((resolve) => setTimeout(resolve, 30))
     expect(ownershipError).toBeInstanceOf(Error)
   })

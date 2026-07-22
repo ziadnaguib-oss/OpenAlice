@@ -1,5 +1,6 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -28,7 +29,7 @@ afterEach(async () => {
   if (savedHome === undefined) delete process.env['OPENALICE_HOME']
   else process.env['OPENALICE_HOME'] = savedHome
   vi.resetModules()
-  await rm(home, { recursive: true, force: true })
+  await rmrf(home)
 })
 
 describe('workspace credential defaults', () => {

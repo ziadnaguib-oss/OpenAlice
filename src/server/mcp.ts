@@ -13,6 +13,9 @@ import type { InboxOrigin } from '../core/inbox-store.js'
 import { extractMcpShape, wrapToolExecute } from '../core/mcp-export.js'
 import { registerCliRoutes } from './cli.js'
 import { resolveInboxOrigin } from './inbox-origin.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'mcp' })
 
 /**
  * MCP Plugin — exposes OpenAlice tools via Streamable HTTP, plus the CLI gateway.
@@ -196,7 +199,7 @@ export class McpPlugin implements Plugin {
     // loopback and is reached by in-container workspaces — only 47331 is
     // published, so nothing external could reach MCP regardless.
     this.server = serve({ fetch: app.fetch, port: this.port, hostname: '127.0.0.1' }, (info) => {
-      console.log(`mcp plugin listening on http://127.0.0.1:${info.port}/mcp (+ /mcp/:wsId, /cli)`)
+      log.info(`mcp plugin listening on http://127.0.0.1:${info.port}/mcp (+ /mcp/:wsId, /cli)`)
     })
   }
 

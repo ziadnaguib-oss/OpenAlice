@@ -19,6 +19,6 @@
     "electron-updater": "^6.8.9"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   }
 }

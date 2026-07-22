@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { parseToolSocketPath } from './lib/log-parse.mjs'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 const pnpmCommand = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'pnpm'
@@ -210,8 +211,10 @@ const onData = (chunk) => {
   const text = chunk.toString()
   output += text
   process.stdout.write(text)
-  const socketMatch = text.match(/local tool gateway listening on (.+)/)
-  if (socketMatch?.[1]) socketPath = socketMatch[1].trim()
+  // JSON-aware: Alice's logs are structured, so a to-EOL capture would take
+  // the envelope's closing `"}` along with the path. See scripts/lib/log-parse.mjs.
+  const parsedSocket = parseToolSocketPath(text)
+  if (parsedSocket) socketPath = parsedSocket
   if (text.includes('electron smoke pty → ok') || text.includes('electron smoke pty -> ok')) {
     ptyPassed = true
     const workspaceMatch = text.match(/electron smoke pty (?:→|->) ok workspace=([^ ]+)/)

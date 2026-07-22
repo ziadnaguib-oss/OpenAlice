@@ -11,6 +11,9 @@
 import { randomUUID } from 'node:crypto'
 import type { SessionEntry, ContentBlock } from './session.js'
 import type { ISessionStore } from './session.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'compaction' })
 
 // ==================== Configuration ====================
 
@@ -252,17 +255,17 @@ export async function compactIfNeeded(
     return { compacted: false, method: 'none' }
   }
 
-  console.log(`compaction: session ${session.id} exceeded threshold (${currentTokens}/${threshold} tokens)`)
+  log.info(`compaction: session ${session.id} exceeded threshold (${currentTokens}/${threshold} tokens)`)
 
   // Phase 1: try microcompact
   const { entries: microcompacted, savedTokens } = microcompact(activeEntries, config)
   if (savedTokens >= MIN_MICROCOMPACT_SAVINGS && estimateSessionTokens(microcompacted) < threshold) {
-    console.log(`compaction: microcompact saved ~${savedTokens} tokens (${currentTokens} → ${estimateSessionTokens(microcompacted)} tokens, ${activeEntries.length} entries)`)
+    log.info(`compaction: microcompact saved ~${savedTokens} tokens (${currentTokens} → ${estimateSessionTokens(microcompacted)} tokens, ${activeEntries.length} entries)`)
     return { compacted: true, method: 'microcompact', activeEntries: microcompacted }
   }
 
   // Phase 2: full compact
-  console.log(`compaction: microcompact insufficient (saved ${savedTokens}), running full LLM summarization...`)
+  log.info(`compaction: microcompact insufficient (saved ${savedTokens}), running full LLM summarization...`)
   const prompt = buildSummarizationPrompt(activeEntries)
   const summaryText = await summarize(prompt)
 
@@ -273,7 +276,7 @@ export async function compactIfNeeded(
   await session.appendRaw(boundary)
   await session.appendRaw(summary)
 
-  console.log(`compaction: full compact done. ${activeEntries.length} entries → summary`)
+  log.info(`compaction: full compact done. ${activeEntries.length} entries → summary`)
   return { compacted: true, method: 'full' }
 }
 
@@ -291,7 +294,7 @@ export async function forceCompact(
   if (activeEntries.length === 0) return null
 
   const currentTokens = estimateSessionTokens(activeEntries)
-  console.log(`compaction: manual compact for session ${session.id} (~${currentTokens} tokens, ${activeEntries.length} entries)`)
+  log.info(`compaction: manual compact for session ${session.id} (~${currentTokens} tokens, ${activeEntries.length} entries)`)
 
   const prompt = buildSummarizationPrompt(activeEntries)
   const summaryText = await summarize(prompt)
@@ -303,6 +306,6 @@ export async function forceCompact(
   await session.appendRaw(boundary)
   await session.appendRaw(summary)
 
-  console.log(`compaction: manual compact done. ${activeEntries.length} entries → summary`)
+  log.info(`compaction: manual compact done. ${activeEntries.length} entries → summary`)
   return { preTokens: currentTokens }
 }

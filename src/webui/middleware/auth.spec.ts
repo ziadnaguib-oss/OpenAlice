@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 /**
  * Auth middleware unit tests.
  *
@@ -8,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
@@ -36,7 +37,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env['OPENALICE_SESSIONS_FILE']
-  await rm(tmpDir, { recursive: true, force: true })
+  await rmrf(tmpDir)
 })
 
 function makeApp(opts: Parameters<typeof createAuthMiddleware>[0]) {

@@ -16,6 +16,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { logger as launcherLogger } from '../workspaces/logger.js';
 import type { WorkspaceService } from '../workspaces/service.js';
 import { validateAndTouch } from '@/services/auth/session-store.js';
+import { scopesSatisfy } from '@/services/auth/scopes.js';
 import { isLoopbackIp, SESSION_COOKIE_NAME } from './middleware/auth.js';
 
 const WS_PATH = '/api/workspaces/pty';
@@ -40,7 +41,13 @@ function readSessionCookie(cookieHeader: string | undefined): string | null {
   return null;
 }
 
-async function isUpgradeAuthorized(req: IncomingMessage): Promise<boolean> {
+/**
+ * The PTY WS is an interactive shell inside a workspace — the same power as
+ * the `/api/workspaces/*` HTTP surface, which requires the `admin` scope.
+ * A `read`/`enqueue`/`gate:approve` session must NOT be able to open a
+ * terminal (M2 QA H-1). Loopback keeps full trust, matching the HTTP gate.
+ */
+export async function isUpgradeAuthorized(req: IncomingMessage): Promise<boolean> {
   if (process.env['OPENALICE_DISABLE_AUTH'] === '1') return true;
 
   const trustedProxies = (process.env['OPENALICE_TRUSTED_PROXIES'] ?? '')
@@ -57,7 +64,9 @@ async function isUpgradeAuthorized(req: IncomingMessage): Promise<boolean> {
   const sid = readSessionCookie(req.headers.cookie);
   if (!sid) return false;
   const session = await validateAndTouch(sid);
-  return session !== null;
+  if (!session) return false;
+  // Pre-M2 sessions carry no scopes → treated as admin (back-compat).
+  return scopesSatisfy(session.scopes ?? ['admin'], 'admin');
 }
 
 export interface AttachedWS {

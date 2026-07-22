@@ -10,6 +10,8 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: false
+  # Hook install runs explicitly via the root `prepare` script, not postinstall.
+  lefthook: false
   msw: false
   node-pty: true
   protobufjs: false

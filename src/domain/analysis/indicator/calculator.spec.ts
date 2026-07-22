@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { IndicatorCalculator } from './calculator'
-import type { IndicatorContext, OhlcvData, TrackedValues } from './types'
+import type { IndicatorContext, OhlcvData, } from './types'
 
 // Mock: 50 根日线，收盘价 100~149，volume 第 48 根为 null 测边界
 const mockData: OhlcvData[] = Array.from({ length: 50 }, (_, i) => ({

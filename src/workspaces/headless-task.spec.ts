@@ -1,6 +1,7 @@
+import { rmrf } from '@/spec-helpers/fs.js';
 import { describe, expect, it } from 'vitest';
 
-import { runHeadlessTask } from './headless-task.js';
+import { runHeadlessTask, classifyHeadlessOutcome, isRetryableOutcome } from './headless-task.js';
 import type { Logger } from './logger.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -134,7 +135,7 @@ describe('runHeadlessTask', () => {
   });
 
   it('streams the FULL stdout/stderr to log files (beyond the 16KB tails)', async () => {
-    const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+    const { mkdtemp, readFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const dir = await mkdtemp(join(tmpdir(), 'headless-log-'));
@@ -165,7 +166,77 @@ describe('runHeadlessTask', () => {
       expect(full.length).toBe(64 * 1024);
       expect(await readFile(stderrFile, 'utf8')).toBe('E-DIAG');
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rmrf(dir);
     }
+  });
+
+  // ── AG-2: heartbeat idle watchdog ──────────────────────────────────
+  it('kills a stalled run via the idle heartbeat with killReason=idle', async () => {
+    // Emits one line, then goes silent forever — a wedged agent. Idle cap
+    // 400ms trips well before the absolute cap.
+    const r = await runHeadlessTask({
+      command: ['node', '-e', 'process.stdout.write("alive\\n"); setInterval(()=>{}, 1000)'],
+      cwd: process.cwd(),
+      env: baseEnv,
+      timeoutMs: 30_000,
+      idleTimeoutMs: 400,
+      logger: noopLogger,
+    });
+    expect(r.killed).toBe(true);
+    expect(r.killReason).toBe('idle');
+    expect(r.stdoutTail).toContain('alive');
+  }, 15_000);
+
+  it('kills a run at the absolute cap with killReason=cap even while it streams', async () => {
+    // Streams continuously (never idle), so only the absolute cap can stop it.
+    const r = await runHeadlessTask({
+      command: ['node', '-e', 'setInterval(()=>process.stdout.write("."), 50)'],
+      cwd: process.cwd(),
+      env: baseEnv,
+      timeoutMs: 500,
+      idleTimeoutMs: 10_000,
+      logger: noopLogger,
+    });
+    expect(r.killed).toBe(true);
+    expect(r.killReason).toBe('cap');
+  }, 15_000);
+
+  it('does not kill a fast healthy run (idle cap never trips)', async () => {
+    const r = await runHeadlessTask({
+      command: ['node', '-e', 'process.stdout.write("done")'],
+      cwd: process.cwd(),
+      env: baseEnv,
+      timeoutMs: 5_000,
+      idleTimeoutMs: 2_000,
+      logger: noopLogger,
+    });
+    expect(r.killed).toBe(false);
+    expect(r.killReason).toBeNull();
+  });
+});
+
+// ── AG-6: outcome classification ─────────────────────────────────────
+describe('classifyHeadlessOutcome', () => {
+  const base = { killed: false, exitCode: 0, assistantText: null };
+  it('killed → timeout', () => {
+    expect(classifyHeadlessOutcome({ ...base, killed: true })).toBe('timeout');
+    // timeout wins even if the process technically reported an exit code / text
+    expect(classifyHeadlessOutcome({ killed: true, exitCode: 0, assistantText: 'x' })).toBe('timeout');
+  });
+  it('non-zero exit → error', () => {
+    expect(classifyHeadlessOutcome({ ...base, exitCode: 1 })).toBe('error');
+    expect(classifyHeadlessOutcome({ ...base, exitCode: -1 })).toBe('error');
+  });
+  it('clean exit with an assistant turn → success', () => {
+    expect(classifyHeadlessOutcome({ ...base, assistantText: 'here is your report' })).toBe('success');
+  });
+  it('clean exit with no assistant turn → no-report', () => {
+    expect(classifyHeadlessOutcome(base)).toBe('no-report');
+  });
+  it('only error and timeout are retryable', () => {
+    expect(isRetryableOutcome('error')).toBe(true);
+    expect(isRetryableOutcome('timeout')).toBe(true);
+    expect(isRetryableOutcome('success')).toBe(false);
+    expect(isRetryableOutcome('no-report')).toBe(false);
   });
 });

@@ -25,6 +25,9 @@ import { dirname } from 'node:path'
 import { EventEmitter } from 'node:events'
 
 import { dataPath } from '@/core/paths.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'entities' })
 
 export type EntityType = 'asset' | 'topic'
 
@@ -130,7 +133,7 @@ export function createEntityStore(opts: EntityStoreOptions = {}): IEntityStore {
         // Tolerate a malformed line instead of bricking every entity op. A
         // corrupted line (e.g. left by a pre-fix concurrent-write interleave)
         // is skipped here and dropped on the next atomic rewrite — self-healing.
-        console.warn('entity-store: skipping malformed line in', filePath)
+        log.warn('entity-store: skipping malformed line', { filePath })
       }
     }
     return out

@@ -1,5 +1,6 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, writeFile, readdir } from 'node:fs/promises'
+import { mkdtemp, writeFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -143,7 +144,7 @@ describe('EntityStore (JSONL persistence)', () => {
     store = createEntityStore({ filePath: path })
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   it('persists across new store instances on the same file', async () => {

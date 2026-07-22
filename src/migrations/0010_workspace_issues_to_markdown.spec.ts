@@ -1,5 +1,6 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm, readdir, stat } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -30,7 +31,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'mig0010-'))
 })
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true })
+  await rmrf(root)
 })
 
 describe('0010 workspace issues → markdown', () => {

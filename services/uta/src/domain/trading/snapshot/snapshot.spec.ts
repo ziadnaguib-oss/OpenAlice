@@ -1,20 +1,20 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readFile, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import Decimal from 'decimal.js'
 import { Order, OrderState } from '@traderalice/ibkr'
 import { UnifiedTradingAccount } from '../UnifiedTradingAccount.js'
 import type { UnifiedTradingAccountOptions } from '../UnifiedTradingAccount.js'
-import { MockBroker, makeContract, makePosition, makeOpenOrder } from '../brokers/mock/index.js'
+import { MockBroker, makeContract, makePosition, type makeOpenOrder } from '../brokers/mock/index.js'
 import { UTAManager } from '../uta-manager.js'
 import { createEventLog, type EventLog } from '@/core/event-log.js'
 import { buildSnapshot } from './builder.js'
 import { createSnapshotStore, type SnapshotStore } from './store.js'
 import { createSnapshotService, type SnapshotService } from './service.js'
 import { createSnapshotScheduler, type SnapshotScheduler } from './scheduler.js'
-import type { UTASnapshot, SnapshotIndex } from './types.js'
+import type { UTASnapshot, } from './types.js'
 import '../contract-ext.js'
 
 // ==================== Helpers ====================
@@ -257,7 +257,7 @@ describe('Snapshot Store', () => {
   })
 
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   // #11
@@ -391,7 +391,7 @@ describe('Snapshot Service', () => {
 
   afterEach(async () => {
     await eventLog._resetForTest()
-    await rm(serviceDir, { recursive: true, force: true })
+    await rmrf(serviceDir)
   })
 
   // #20

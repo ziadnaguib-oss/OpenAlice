@@ -10,6 +10,7 @@ import {
   type IssuesSnapshot,
   type IssuesSnapshotWorkspace,
 } from './board.js'
+import type { IssueRecord } from './declaration.js'
 
 function ws(wsId: string, titles: string[]): IssuesSnapshotWorkspace {
   return {
@@ -106,14 +107,20 @@ describe('flattenBoardRows', () => {
 })
 
 describe('workspace default assignee projection', () => {
-  const baseIssue = {
+  // Explicitly typed (not `as const`) so literals narrow to the enums while
+  // `depends_on` stays a mutable string[].
+  const baseIssue: Omit<IssueRecord, 'assigneeDefaulted'> = {
     id: 'i',
     title: 'Issue',
     status: 'todo',
     priority: 'none',
     assignee: 'unassigned',
+    retries: 0,
+    backoff: '30s',
+    calendar: 'always',
+    depends_on: [],
     body: '',
-  } as const
+  }
 
   it('projects a missing assignee to the owning workspace', () => {
     const issue = { ...baseIssue, assigneeDefaulted: true }

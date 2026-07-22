@@ -1,5 +1,6 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -200,7 +201,7 @@ describe('InboxStore (JSONL persistence)', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0].docs).toEqual([{ path: 'report.md' }])
     expect(entries[0].comments).toBe('final draft')
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   it('origin survives a JSONL round-trip; a legacy line (no origin) still parses', async () => {
@@ -221,7 +222,7 @@ describe('InboxStore (JSONL persistence)', () => {
     const withOrigin = entries.find((e) => e.comments === 'with origin')
     expect(legacy?.origin).toBeUndefined()
     expect(withOrigin?.origin).toEqual({ kind: 'headless', runId: 'r1', issueId: 'i1', agent: 'opencode' })
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   it('returns empty when file does not exist', async () => {
@@ -229,7 +230,7 @@ describe('InboxStore (JSONL persistence)', () => {
     const { entries, hasMore } = await missing.read()
     expect(entries).toEqual([])
     expect(hasMore).toBe(false)
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   it('delete rewrites the JSONL atomically; missing entries do not corrupt the file', async () => {
@@ -249,7 +250,7 @@ describe('InboxStore (JSONL persistence)', () => {
     const fresh2 = createInboxStore({ filePath: path, readStatePath })
     const { entries: again } = await fresh2.read()
     expect(again.map((e) => e.id)).toEqual([c.id, a.id])
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   it('persists read state in a sidecar file without mutating entries JSONL', async () => {
@@ -267,7 +268,7 @@ describe('InboxStore (JSONL persistence)', () => {
       version: 1,
       read: { [a.id]: 4567 },
     })
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   it('serializes concurrent read-state writes so marks do not clobber each other', async () => {
@@ -281,7 +282,7 @@ describe('InboxStore (JSONL persistence)', () => {
     expect(readBack.map((entry) => entry.readAt).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual(
       Array.from({ length: 8 }, (_, i) => 1000 + i),
     )
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   it('delete removes the entry and its sidecar read marker', async () => {
@@ -298,7 +299,7 @@ describe('InboxStore (JSONL persistence)', () => {
       version: 1,
       read: {},
     })
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 
   it('delete leaves no tmp file on the side', async () => {
@@ -308,6 +309,6 @@ describe('InboxStore (JSONL persistence)', () => {
     const entries = await fs.readdir(dir)
     expect(entries).toContain('entries.jsonl')
     expect(entries).not.toContain('entries.jsonl.tmp')
-    await rm(dir, { recursive: true, force: true })
+    await rmrf(dir)
   })
 })

@@ -29,7 +29,15 @@ import { loadConfig, type ServerConfig } from './config.js';
 import { ensureAgentCredentialReady } from './agent-credential-readiness.js';
 import { logger as launcherLogger } from './logger.js';
 import { runHeadlessProbe, type HeadlessProbeResult } from './probe.js';
-import { runHeadlessTask, type HeadlessTaskResult } from './headless-task.js';
+import {
+  runHeadlessTask,
+  classifyHeadlessOutcome,
+  type HeadlessOutcome,
+  type HeadlessTaskResult,
+} from './headless-task.js';
+import { TaskQueueStore, type QueueSnapshot } from './queue/store.js';
+import { QueueDispatchLoop } from './queue/dispatch-loop.js';
+import { PRIORITY, type QueueTask, type RunningTask, type TaskSource } from './queue/types.js';
 import {
   checkingRuntimeReadinessRow,
   failedRuntimeReadinessRow,
@@ -45,7 +53,7 @@ import {
   type AgentRuntimeReadinessSource,
 } from './agent-runtime-readiness.js';
 import { ScheduleMarkerStore } from './schedule/marker-store.js';
-import { ScheduleScanner, DEFAULT_INTERVAL_MS } from './schedule/scanner.js';
+import { ScheduleScanner, DEFAULT_INTERVAL_MS, type ScheduleDryRun } from './schedule/scanner.js';
 import {
   readWorkspaceIssues,
   snapshotScheduledIssue,
@@ -53,6 +61,8 @@ import {
   type ScheduleSnapshotTask,
   type ScheduleSnapshotWorkspace,
 } from './schedule/declaration.js';
+import { issueFirePrompt, isTerminalStatus as isTerminalIssueStatus } from './issues/declaration.js';
+import { parseDuration } from '@/core/duration.js';
 import {
   annotateNameCollisions,
   detailIssue,
@@ -78,10 +88,15 @@ import {
   type ChatWorkspaceResolution,
 } from './chat-workspace-resolver.js';
 
-/** Max concurrent in-flight headless tasks — backstop against unbounded spawn. */
-const MAX_CONCURRENT_HEADLESS = 8;
+/** Max concurrent in-flight headless tasks — backstop against unbounded spawn.
+ *  Exported for the /api/metrics capacity gauge. */
+export const MAX_CONCURRENT_HEADLESS = 8;
 
-/** Thrown by `dispatchHeadlessTask` when the concurrency cap is hit (→ HTTP 429). */
+/**
+ * Reserved for a future per-lane HARD cap that rejects rather than queues.
+ * No longer thrown since M4 — over-cap work now waits in the queue's `pending/`
+ * — but kept on the public surface for callers that still narrow on it.
+ */
 export class HeadlessCapacityError extends Error {
   constructor(public readonly limit: number) {
     super(`headless capacity reached (${limit} tasks running)`);
@@ -195,9 +210,9 @@ export interface WorkspaceService {
    */
   probeAgentRuntimeReadiness(agentId?: string): Promise<AgentRuntimeReadinessSnapshot>;
   /**
-   * ASYNC dispatch — records the task, spawns it in the background, returns the
-   * taskId immediately (the automation path). Throws `HeadlessCapacityError`
-   * when the concurrency cap is hit.
+   * ENQUEUE a headless run into the durable queue (M4) and return its task id
+   * immediately. The queue decides when it starts (lanes, priorities,
+   * `notBefore`); over-cap work waits in `pending/` rather than being rejected.
    */
   dispatchHeadlessTask(
     meta: WorkspaceMeta,
@@ -213,6 +228,11 @@ export interface WorkspaceService {
    *  directory (scheduled issues only) + each task's last-fired marker and
    *  computed next-due. Powers GET /api/schedule. */
   scheduleSnapshot(): Promise<ScheduleSnapshot>;
+  /** Preview the planned scheduled fires over the next `days` days without
+   *  executing anything (AU-7). Powers GET /api/schedule/dry-run. */
+  scheduleDryRun(days: number): Promise<ScheduleDryRun>;
+  /** Durable queue state: pending + running tasks and the lane config (M4). */
+  queueSnapshot(): Promise<QueueSnapshot>;
   /** Read-only snapshot of every workspace's `.alice/issues/` directory — ALL
    *  issues (scheduled or not), scheduled ones enriched with firing markers.
    *  Powers the global Issue board GET /api/issues. */
@@ -290,6 +310,10 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     launcherLogger.child({ scope: 'headless-registry' }),
     { logsDir: headlessLogsDir },
   );
+
+  // Durable task queue (M4). Lives under the user-data root (not the launcher
+  // root) alongside the rest of `data/`, so a data backup carries queued work.
+  const taskQueue = await TaskQueueStore.open(launcherLogger.child({ scope: 'queue' }));
 
   const scrollbackStore = new ScrollbackStore(
     join(config.launcherRoot, 'state'),
@@ -628,6 +652,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     exitCode: -1,
     signal: null,
     killed: false,
+    killReason: null,
     durationMs: 0,
     stdoutTail: '',
     stderrTail: message,
@@ -815,7 +840,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     // Dispatch-path extras: a taskId keys the on-disk task log; onSessionId
     // fires when the adapter's stdout scanner captures the agent's own session
     // id (recorded WHILE running, so the panel can offer "open as session").
-    opts: { taskId?: string; onSessionId?: (id: string) => void } = {},
+    opts: { taskId?: string; onSessionId?: (id: string) => void; idleTimeoutMs?: number } = {},
   ): Promise<HeadlessTaskResult> => {
     if (!adapter.capabilities.headless || !adapter.composeHeadlessCommand) {
       throw new Error(`adapter "${adapter.id}" has no headless mode`);
@@ -846,6 +871,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       cwd,
       env,
       timeoutMs,
+      ...(opts.idleTimeoutMs ? { idleTimeoutMs: opts.idleTimeoutMs } : {}),
       logger: launcherLogger.child({ scope: 'headless', wsId: ws.id, agent: adapter.id }),
       ...(logPaths ? { stdoutFile: logPaths.stdout, stderrFile: logPaths.stderr } : {}),
       ...(adapter.extractHeadlessSessionId
@@ -859,11 +885,101 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
   };
 
   /**
-   * ASYNC dispatch: record the task, spawn it in the background, return the
-   * taskId immediately. The record fills in on exit. This is the automation
-   * path (a trigger doesn't wait minutes for the run); the sync
-   * `runHeadlessTask` stays for the `wait:true` API mode + direct callers.
-   * Throws `HeadlessCapacityError` when too many tasks are already in flight.
+  /**
+   * Execute ONE claimed queue task (M4). The dispatch loop owns *when* this
+   * runs; this owns *how*: mark the record running, spawn the headless CLI,
+   * classify the outcome (AG-6) and finalize the registry record. Retry,
+   * chaining and lane capacity are the loop's business, so this returns the
+   * outcome and nothing else.
+   */
+  const runQueuedTask = async (task: RunningTask): Promise<HeadlessOutcome> => {
+    const ws = registry.get(task.wsId);
+    if (!ws) {
+      await headlessTasks.complete(task.id, {
+        status: 'failed', outcome: 'error', finishedAt: Date.now(),
+        error: `workspace ${task.wsId} no longer exists`,
+      });
+      return 'error';
+    }
+    const adapter = adapters.resolve(task.agent);
+    await headlessTasks.markRunning(task.id, Date.now());
+
+    const r = await runHeadlessTaskMethod(ws, adapter, task.prompt, task.timeoutMs, {
+      taskId: task.id,
+      ...(task.idleTimeoutMs ? { idleTimeoutMs: task.idleTimeoutMs } : {}),
+      onSessionId: (id) =>
+        void headlessTasks
+          .setAgentSessionId(task.id, id)
+          .catch((err) =>
+            launcherLogger.warn('headless.session_id_record_failed', { taskId: task.id, err }),
+          ),
+    });
+
+    const outcome = classifyHeadlessOutcome(r);
+    const status = outcome === 'success' || outcome === 'no-report' ? 'done' : 'failed';
+    await headlessTasks.complete(task.id, {
+      status,
+      outcome,
+      killReason: r.killReason,
+      finishedAt: Date.now(),
+      durationMs: r.durationMs,
+      exitCode: r.exitCode,
+      signal: r.signal,
+      killed: r.killed,
+    });
+    return outcome;
+  };
+
+  /**
+   * Close a one-shot issue once its run chain is genuinely over (the loop calls
+   * this only on a terminal outcome, so a retrying issue stays open). Repeating
+   * schedules keep their issue; failed one-shots stay open for inspection.
+   */
+  const onQueueTerminal = async (task: RunningTask, outcome: HeadlessOutcome): Promise<void> => {
+    const ws = registry.get(task.wsId);
+    if (!ws || !task.issueId) return;
+    const rec = headlessTasks.get(task.id);
+    try {
+      const issueCompletion = await completeOneShotIssueAfterRun({
+        wsDir: ws.dir,
+        issueId: task.issueId,
+        status: outcome === 'success' || outcome === 'no-report' ? 'done' : 'failed',
+        exitCode: rec?.exitCode ?? null,
+        killed: rec?.killed ?? false,
+      });
+      if (issueCompletion.updated) {
+        launcherLogger.info('issue.oneshot_completed', {
+          wsId: ws.id,
+          issueId: issueCompletion.issueId,
+          previousStatus: issueCompletion.previousStatus,
+          taskId: task.id,
+        });
+      } else if (
+        issueCompletion.reason === 'mutation_failed' ||
+        issueCompletion.reason === 'issues_unavailable'
+      ) {
+        launcherLogger.warn('issue.oneshot_complete_skipped', {
+          wsId: ws.id, issueId: task.issueId, taskId: task.id,
+          reason: issueCompletion.reason, error: issueCompletion.error,
+        });
+      }
+    } catch (err) {
+      launcherLogger.warn('issue.oneshot_complete_failed', {
+        wsId: ws.id, issueId: task.issueId, taskId: task.id, err,
+      });
+    }
+  };
+
+  /**
+   * ENQUEUE a headless run (M4). Returns immediately with the task id — the
+   * durable queue decides when it actually starts, honouring lanes, priorities
+   * and `notBefore` backoff. The record is created as `queued` and flips to
+   * `running` when the dispatch loop claims it, so one run keeps ONE id from
+   * submission to journal.
+   *
+   * Capacity no longer REJECTS: over-cap work waits in `pending/` instead of
+   * throwing `HeadlessCapacityError` (kept exported for callers that still
+   * narrow on it).
    */
   const dispatchHeadlessTaskMethod = async (
     ws: WorkspaceMeta,
@@ -873,94 +989,78 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     // The firing issue's id, when this dispatch came from the ScheduleScanner.
     // Manual/external runs (the workspace "run task" route) leave it undefined.
     issueId?: string,
+    dispatchOpts?: {
+      retry?: { attempt: number; maxAttempts: number; backoffMs: number };
+      idleTimeoutMs?: number;
+      /** Queue placement — the scanner supplies these from issue frontmatter. */
+      lane?: string;
+      priority?: number;
+      source?: TaskSource;
+      dependsOn?: string[];
+      chain?: { onSuccess?: string; onFailure?: string };
+    },
   ): Promise<{ taskId: string }> => {
     if (!adapter.capabilities.headless || !adapter.composeHeadlessCommand) {
       throw new Error(`adapter "${adapter.id}" has no headless mode`);
     }
+    // Idempotent per issue: if this issue already has an active (queued or
+    // running) task, return it instead of enqueuing a duplicate. Without this a
+    // scheduled issue blocked on a dependency would accumulate a fresh copy
+    // every scanner tick, and a chained follow-up could double up with the
+    // issue's own schedule. Manual runs (no issueId) always create a new task.
+    if (issueId) {
+      const existing = await taskQueue.activeTaskFor(ws.id, issueId);
+      if (existing) {
+        launcherLogger.info('queue.enqueue_deduped', { wsId: ws.id, issueId, existing });
+        return { taskId: existing };
+      }
+    }
+
+    // Fail fast at submission rather than discovering a missing credential
+    // minutes later when the loop claims the task.
     await ensureAgentCredentialReady({
       meta: ws,
       agentId: adapter.id,
       adapter,
       logger: launcherLogger,
     });
-    if (headlessTasks.runningCount() >= MAX_CONCURRENT_HEADLESS) {
-      throw new HeadlessCapacityError(MAX_CONCURRENT_HEADLESS);
-    }
-    const rec = await headlessTasks.create({
+
+    const retry = dispatchOpts?.retry;
+    const id = randomUUID();
+    await headlessTasks.create({
+      taskId: id,
+      status: 'queued',
       wsId: ws.id,
       agent: adapter.id,
       prompt,
       startedAt: Date.now(),
       ...(issueId ? { issueId } : {}),
+      ...(retry ? { attempt: retry.attempt, maxAttempts: retry.maxAttempts } : {}),
     });
-    // Fire-and-forget: run to natural exit, then fill the record. NOTE: status
-    // is judged by exit code — pi can exit 0 on an in-band model error, so
-    // "done" means "process exited cleanly", not "the agent succeeded"; the
-    // operator confirms via the Inbox / the task's tail.
-    void runHeadlessTaskMethod(ws, adapter, prompt, timeoutMs, {
-      taskId: rec.taskId,
-      onSessionId: (id) =>
-        void headlessTasks
-          .setAgentSessionId(rec.taskId, id)
-          .catch((err) =>
-            launcherLogger.warn('headless.session_id_record_failed', { taskId: rec.taskId, err }),
-          ),
-    })
-      .then(async (r) => {
-        const status = r.killed ? 'failed' : r.exitCode === 0 ? 'done' : 'failed';
-        await headlessTasks.complete(rec.taskId, {
-          status,
-          finishedAt: Date.now(),
-          durationMs: r.durationMs,
-          exitCode: r.exitCode,
-          signal: r.signal,
-          killed: r.killed,
-        });
-        // Scheduled one-shot issues are the only board items whose lifecycle can
-        // be closed mechanically from a run exit. Repeating schedules keep their
-        // issue open; failed one-shots stay open so the operator can inspect and
-        // decide whether to rerun.
-        try {
-          const issueCompletion = await completeOneShotIssueAfterRun({
-            wsDir: ws.dir,
-            issueId,
-            status,
-            exitCode: r.exitCode,
-            killed: r.killed,
-          });
-          if (issueCompletion.updated) {
-            launcherLogger.info('issue.oneshot_completed', {
-              wsId: ws.id,
-              issueId: issueCompletion.issueId,
-              previousStatus: issueCompletion.previousStatus,
-              taskId: rec.taskId,
-            });
-          } else if (issueCompletion.reason === 'mutation_failed' || issueCompletion.reason === 'issues_unavailable') {
-            launcherLogger.warn('issue.oneshot_complete_skipped', {
-              wsId: ws.id,
-              issueId,
-              taskId: rec.taskId,
-              reason: issueCompletion.reason,
-              error: issueCompletion.error,
-            });
-          }
-        } catch (err) {
-          launcherLogger.warn('issue.oneshot_complete_failed', {
-            wsId: ws.id,
-            issueId,
-            taskId: rec.taskId,
-            err,
-          });
-        }
-      })
-      .catch((err) =>
-        headlessTasks.complete(rec.taskId, {
-          status: 'failed',
-          finishedAt: Date.now(),
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    return { taskId: rec.taskId };
+    await taskQueue.enqueue({
+      id,
+      source: dispatchOpts?.source ?? (issueId ? 'schedule' : 'manual'),
+      wsId: ws.id,
+      agent: adapter.id,
+      prompt,
+      ...(issueId ? { issueId } : {}),
+      lane: dispatchOpts?.lane ?? '',
+      priority: dispatchOpts?.priority ?? (issueId ? PRIORITY.cron : PRIORITY.interactive),
+      attempt: retry?.attempt ?? 1,
+      maxAttempts: retry?.maxAttempts ?? 1,
+      backoffMs: retry?.backoffMs ?? 30_000,
+      timeoutMs,
+      ...(dispatchOpts?.idleTimeoutMs ? { idleTimeoutMs: dispatchOpts.idleTimeoutMs } : {}),
+      notBefore: 0,
+      ...(dispatchOpts?.dependsOn?.length ? { dependsOn: dispatchOpts.dependsOn } : {}),
+      ...(dispatchOpts?.chain ? { chain: dispatchOpts.chain } : {}),
+      createdAt: Date.now(),
+    });
+    launcherLogger.info('queue.enqueued', {
+      taskId: id, wsId: ws.id, issueId, agent: adapter.id,
+      lane: dispatchOpts?.lane || `ws:${ws.id}`,
+    });
+    return { taskId: id };
   };
 
   // ── Workspace self-scheduling. Scan each workspace's own `.alice/issues/*.md`
@@ -984,6 +1084,73 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     logger: launcherLogger.child({ scope: 'schedule' }),
   });
   scheduleScanner.start();
+
+  // The worker pool: claims queued tasks and spawns the headless runs that ARE
+  // the workers. Dependency gating reads live issue state; chaining builds a
+  // follow-up task from the referenced issue in the same workspace.
+  const queueLoop = new QueueDispatchLoop({
+    store: taskQueue,
+    logger: launcherLogger.child({ scope: 'queue' }),
+    runTask: runQueuedTask,
+    onTerminal: onQueueTerminal,
+    // Reset the run record to `queued` for the next attempt so the panel does
+    // not show a retrying task as failed-and-finished (QA H-1).
+    onRetry: (task, nextAttempt) => headlessTasks.requeueRecord(task.id, nextAttempt),
+    dependenciesMet: async (wsId, issueIds) => {
+      const ws = registry.get(wsId);
+      if (!ws) return true; // workspace gone — do not block forever
+      const res = await readWorkspaceIssues(ws.dir);
+      if (!res.ok) return true; // unreadable board must not wedge the queue
+      return issueIds.every((id) => {
+        const issue = res.issues.find((i) => i.id === id);
+        // An unknown dependency is treated as satisfied (it may have been
+        // deleted); a known one must be terminal.
+        return !issue || isTerminalIssueStatus(issue.status);
+      });
+    },
+    buildChainTask: async (parent, issueId) => {
+      const ws = registry.get(parent.wsId);
+      if (!ws) return null;
+      const res = await readWorkspaceIssues(ws.dir);
+      if (!res.ok) return null;
+      const issue = res.issues.find((i) => i.id === issueId);
+      if (!issue || isTerminalIssueStatus(issue.status)) return null;
+      // Do not double up with an already-active task for this issue (its own
+      // schedule may have enqueued it) — QA M-1.
+      if (await taskQueue.activeTaskFor(ws.id, issue.id)) return null;
+      const adapter = resolveAdapter(ws, issue.agent ?? undefined);
+      if (!adapter.capabilities.headless) return null;
+      const id = randomUUID();
+      await headlessTasks.create({
+        taskId: id,
+        status: 'queued',
+        wsId: ws.id,
+        agent: adapter.id,
+        prompt: issueFirePrompt(issue),
+        startedAt: Date.now(),
+        issueId: issue.id,
+      });
+      return {
+        id,
+        source: 'chain' as const,
+        wsId: ws.id,
+        agent: adapter.id,
+        prompt: issueFirePrompt(issue),
+        issueId: issue.id,
+        lane: '',
+        // A chained follow-up is event-driven, so it outranks cron work.
+        priority: PRIORITY.event,
+        attempt: 1,
+        maxAttempts: issue.retries + 1,
+        backoffMs: parseDuration(issue.backoff) ?? 30_000,
+        timeoutMs: parent.timeoutMs,
+        ...(parent.idleTimeoutMs ? { idleTimeoutMs: parent.idleTimeoutMs } : {}),
+        notBefore: 0,
+        createdAt: Date.now(),
+      } satisfies QueueTask;
+    },
+  });
+  await queueLoop.start();
 
   // Read-only aggregation for the Schedules dashboard (GET /api/schedule).
   // Walks each workspace's live declaration + the scanner's marker; the route
@@ -1319,6 +1486,9 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     shuttingDown = true;
     launcherLogger.info('workspaces.dispose', { reason, activeSessions: pool.size() });
     scheduleScanner.stop();
+    // Stop claiming. In-flight runs die with the process; their `running/`
+    // entries are re-queued by the next boot's reconcile.
+    queueLoop.stop();
     pool.disposeAll('plugin shutdown');
     transcriptWatcher.disposeAll();
   };
@@ -1345,6 +1515,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     runHeadlessTask: runHeadlessTaskMethod,
     dispatchHeadlessTask: dispatchHeadlessTaskMethod,
     scheduleSnapshot,
+    scheduleDryRun: (days: number) => scheduleScanner.dryRun(days),
+    queueSnapshot: () => taskQueue.snapshot(),
     issuesSnapshot,
     issueDetail,
     resolveIssuesByName,

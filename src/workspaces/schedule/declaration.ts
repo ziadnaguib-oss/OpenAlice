@@ -16,10 +16,8 @@
 
 import { computeNextRun, type Schedule } from '../../core/schedule-expr.js'
 import {
-  isFireable,
   isTerminalStatus,
   issueFirePrompt,
-  readWorkspaceIssues,
   type IssueRecord,
 } from '../issues/declaration.js'
 

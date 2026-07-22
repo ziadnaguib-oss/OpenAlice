@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { rmrf } from '@/spec-helpers/fs.js'
+import { mkdtemp, } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -23,7 +24,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'sr-'))
 })
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true })
+  await rmrf(root)
 })
 
 // Petname wsId so bootFixup proves it scans the new human-readable file shape.

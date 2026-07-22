@@ -1,0 +1,99 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
+	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+	"files": {
+		"includes": [
+			"src/**",
+			"services/uta/src/**",
+			"scripts/**",
+			"apps/desktop/src/**",
+			"ui/src/**",
+			"!**/dist",
+			"!packages",
+			"!**/*.css"
+		]
+	},
+	"formatter": {
+		"enabled": false
+	},
+	"assist": {
+		"enabled": false
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"a11y": {
+				"preset": "recommended",
+				"useButtonType": "warn",
+				"noSvgWithoutTitle": "warn",
+				"noLabelWithoutControl": "warn",
+				"useKeyWithClickEvents": "warn",
+				"noStaticElementInteractions": "warn",
+				"useAriaPropsSupportedByRole": "warn",
+				"useSemanticElements": "warn",
+				"noAutofocus": "warn",
+				"useFocusableInteractive": "warn",
+				"useAriaPropsForRole": "warn",
+				"noNoninteractiveElementToInteractiveRole": "warn",
+				"noAriaHiddenOnFocusable": "warn"
+			},
+			"suspicious": {
+				"noExplicitAny": "off",
+				"noAssignInExpressions": "off",
+				"noArrayIndexKey": "off",
+				"noUndeclaredEnvVars": "off",
+				"noGlobalIsNan": "warn",
+				"noGlobalIsFinite": "warn",
+				"noImplicitAnyLet": "warn",
+				"noControlCharactersInRegex": "warn",
+				"noApproximativeNumericConstant": "warn",
+				"noPrototypeBuiltins": "warn",
+				"noTemplateCurlyInString": "warn",
+				"useIterableCallbackReturn": "warn",
+				"useBiomeIgnoreFolder": "warn"
+			},
+			"style": {
+				"noNonNullAssertion": "off",
+				"useNodejsImportProtocol": "off",
+				"useTemplate": "off",
+				"useExponentiationOperator": "off",
+				"noDescendingSpecificity": "warn"
+			},
+			"security": {
+				"noDangerouslySetInnerHtml": "warn"
+			},
+			"complexity": {
+				"noForEach": "off",
+				"noBannedTypes": "off",
+				"useLiteralKeys": "off",
+				"useOptionalChain": "off",
+				"noImportantStyles": "warn"
+			},
+			"correctness": {
+				"useExhaustiveDependencies": "warn",
+				"useHookAtTopLevel": "warn",
+				"noUnusedVariables": "warn",
+				"noUnusedFunctionParameters": "off"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": [
+				"src/**",
+				"!src/**/*.spec.ts",
+				"!src/spec-helpers/**",
+				"!src/workspaces/templates/**",
+				"!src/workspaces/cli/**"
+			],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noConsole": "error"
+					}
+				}
+			}
+		}
+	]
+}

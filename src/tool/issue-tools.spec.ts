@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { rmrf } from '@/spec-helpers/fs.js'
+import { mkdtemp, } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,7 +26,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'issue-tools-'))
 })
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
+  await rmrf(dir)
 })
 
 /** Context whose `resolveWorkspace(self)` points at the temp checkout dir. */

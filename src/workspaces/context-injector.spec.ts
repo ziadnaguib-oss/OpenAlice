@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js';
 /**
  * Golden / characterization test for launcher-owned context injection. The
  * MCP bytes are asserted exactly; the persona composition is asserted to equal
@@ -7,7 +8,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +44,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'inject-'));
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rmrf(dir);
 });
 
 const read = (rel: string): Promise<string> => readFile(join(dir, rel), 'utf8');

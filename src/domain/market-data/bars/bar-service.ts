@@ -17,7 +17,6 @@ import { aggregateSymbolSearch, type AssetClass } from '../aggregate-search.js'
 import type {
   BarService,
   BarServiceDeps,
-  BarSourceRef,
   BarSourceCandidate,
   GetBarsOpts,
   BarsResult,
@@ -26,6 +25,9 @@ import type {
   BarCapability,
 } from './types.js'
 import { formatBarId, parseBarId } from './types.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'bars' })
 
 /** Hard ceiling on bars returned by any single fetch (explosion guard). */
 const MAX_BARS = 5000
@@ -174,7 +176,7 @@ function finalize(data: OhlcvBar[], count?: number): OhlcvBar[] {
   data.sort((a, b) => a.date.localeCompare(b.date))
   let out = data
   if (out.length > MAX_BARS) {
-    console.warn(`[bar-service] result ${out.length} bars exceeds MAX_BARS=${MAX_BARS}; keeping most recent`)
+    log.warn(`[bar-service] result ${out.length} bars exceeds MAX_BARS=${MAX_BARS}; keeping most recent`)
     out = out.slice(-MAX_BARS)
   }
   if (count != null && out.length > count) out = out.slice(-count)

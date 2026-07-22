@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Decimal from 'decimal.js'
-import { ContractDescription, Order, OrderState, UNSET_DOUBLE, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { ContractDescription, Order, OrderState, } from '@traderalice/ibkr'
 // Co-located with the broker stubs it exercises — MockBroker +
 // UTAManager + UnifiedTradingAccount live in services/uta/src/domain/
 // trading/. The spec still tests Alice's tool layer (createTradingTools),

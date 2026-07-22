@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 /**
  * Auth route tests — focused on the session-cookie `Secure` flag and
  * X-Forwarded-* trust gating in /api/auth/login.
@@ -13,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
@@ -38,7 +39,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env['OPENALICE_SESSIONS_FILE']
-  await rm(tmpDir, { recursive: true, force: true })
+  await rmrf(tmpDir)
 })
 
 beforeEach(async () => {

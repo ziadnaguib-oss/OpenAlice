@@ -23,6 +23,9 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Migration } from '../types.js'
 import { dataPath } from '@/core/paths.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'migrations' })
 
 const DEFAULT_JOBS_PATH = dataPath('cron', 'jobs.json')
 
@@ -79,7 +82,7 @@ export async function disableTargetlessCronJobs(
   await rename(tmp, jobsFilePath)
 
   for (const name of disabled) {
-    console.log(`[migration 0008] disabled targetless cron job ${name} — assign a workspace + agent to re-enable`)
+    log.info(`[migration 0008] disabled targetless cron job ${name} — assign a workspace + agent to re-enable`)
   }
 
   return { disabled }

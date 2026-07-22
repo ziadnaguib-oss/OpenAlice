@@ -17,6 +17,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile, chmod, rename, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { dataPath } from '@/core/paths.js'
+import type { TokenScope } from './scopes.js'
 
 const SID_BYTES = 32
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000  // 7 days
@@ -36,6 +37,9 @@ export interface SessionRecord {
   expiresAt: string
   userAgent?: string
   ip?: string
+  /** Scopes inherited from the credential that created the session (M2).
+   *  Absent on pre-M2 records → treated as ['admin'] by the middleware. */
+  scopes?: TokenScope[]
 }
 
 interface SessionsFile {
@@ -90,6 +94,7 @@ export async function createSession(opts: {
   userAgent?: string
   ip?: string
   ttlMs?: number
+  scopes?: TokenScope[]
 } = {}): Promise<SessionRecord> {
   const file = await loadCache()
   const now = new Date()
@@ -101,6 +106,7 @@ export async function createSession(opts: {
     expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
     userAgent: opts.userAgent,
     ip: opts.ip,
+    scopes: opts.scopes ?? ['admin'],
   }
   file.sessions.push(record)
   await flush()

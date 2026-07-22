@@ -1,8 +1,9 @@
+import { rmrf } from '@/spec-helpers/fs.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createToolCallLog, type ToolCallLog, type ToolCallRecord } from './tool-call-log.js'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, } from 'node:fs/promises'
 
 // Use a temp directory per test to avoid cross-contamination
 let log: ToolCallLog
@@ -15,7 +16,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await log.close()
-  await rm(tempDir, { recursive: true, force: true })
+  await rmrf(tempDir)
 })
 
 /** Helper: complete a tool call round-trip and return the record. */

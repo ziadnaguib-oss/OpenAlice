@@ -13,7 +13,7 @@ import { Hono } from 'hono'
 import { headlessLogPaths, type HeadlessTaskStatus } from '../../workspaces/headless-task-registry.js'
 import type { WorkspaceService } from '../../workspaces/service.js'
 
-const STATUSES = new Set<HeadlessTaskStatus>(['running', 'done', 'failed', 'interrupted'])
+const STATUSES = new Set<HeadlessTaskStatus>(['queued', 'running', 'done', 'failed', 'interrupted'])
 
 const DEFAULT_TAIL_BYTES = 64 * 1024
 const MAX_TAIL_BYTES = 1024 * 1024
@@ -42,6 +42,12 @@ async function readTail(
 
 export function createHeadlessRoutes(svc: WorkspaceService): Hono {
   const app = new Hono()
+
+  // GET /api/headless/queue → durable queue state: pending + running + lanes
+  // (M4). Registered BEFORE /:taskId so the literal path wins.
+  app.get('/queue', async (c) => {
+    return c.json(await svc.queueSnapshot())
+  })
 
   // GET /api/headless?wsId=&status=&limit=  → tasks, newest-first.
   app.get('/', (c) => {

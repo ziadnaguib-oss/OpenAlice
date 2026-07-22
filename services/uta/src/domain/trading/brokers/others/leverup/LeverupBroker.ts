@@ -55,7 +55,7 @@ import {
   signClosePosition,
   type SchemaVariant,
 } from './eip712.js'
-import { fetchPythUpdateData, fetchPythPrice } from './pyth.js'
+import { fetchPythPrice } from './pyth.js'
 import {
   RelayerClient,
   type OpenPositionRequest,

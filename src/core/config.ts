@@ -6,6 +6,9 @@ import { newsCollectorSchema } from '../domain/news/config.js'
 import { runMigrations } from '../migrations/runner.js'
 import { dataPath } from '@/core/paths.js'
 import { isSealedEnvelope, seal, unseal } from './sealing.js'
+import { logger } from '@/core/logger.js'
+
+const log = logger.child({ scope: 'config' })
 
 const CONFIG_DIR = dataPath('config')
 
@@ -70,24 +73,6 @@ const engineSchema = z.object({
   port: z.number().int().positive().default(3000),
 })
 
-// ==================== AI Provider: Legacy Schema (kept for migration) ====================
-
-const legacyLoginMethodSchema = z.enum(['api-key', 'claudeai', 'codex-oauth'])
-
-/** @deprecated Legacy flat schema — used only for migration detection. */
-export const aiProviderLegacySchema = z.object({
-  backend: z.enum(['claude-code', 'vercel-ai-sdk', 'agent-sdk', 'codex']).default('claude-code'),
-  provider: z.string().default('anthropic'),
-  model: z.string().default('claude-opus-4-7'),
-  baseUrl: z.string().min(1).optional(),
-  loginMethod: legacyLoginMethodSchema.default('api-key'),
-  apiKeys: z.object({
-    anthropic: z.string().optional(),
-    openai: z.string().optional(),
-    google: z.string().optional(),
-  }).default({}),
-})
-
 // ==================== AI Provider: Profile-based Schema ====================
 
 export type AIBackend = 'agent-sdk' | 'codex' | 'vercel-ai-sdk'
@@ -113,9 +98,10 @@ export type CredentialAuthType = z.infer<typeof credentialAuthTypeEnum>
  * The wire protocol the credential's endpoint speaks. Load-bearing, NOT
  * derivable from baseUrl alone — OpenAI Chat Completions and Responses share
  * one base URL (api.openai.com/v1), so only this field distinguishes them. Also
- * tells injection how to configure the consuming adapter. Mirrors the
- * `WireShape` union in ai-providers/preset-catalog.ts (kept in sync by hand —
- * 3 stable values; core must not depend on the ai-providers layer).
+ * tells injection how to configure the consuming adapter. This enum is the
+ * single source of truth: ai-providers/preset-catalog.ts aliases its
+ * `WireShape` from `CredentialWireShape` via a type-only import (erased at
+ * compile time — core still has no dependency on the ai-providers layer).
  */
 export const credentialWireShapeEnum = z.enum(['anthropic', 'openai-chat', 'openai-responses'])
 export type CredentialWireShape = z.infer<typeof credentialWireShapeEnum>
@@ -399,6 +385,23 @@ export const toolsSchema = z.object({
   disabled: z.array(z.string()).default([]),
 })
 
+export const metricsSchema = z.object({
+  /** Serve /api/metrics + /api/debug/bundle on the web listener. One-line
+   *  rollback: set false and both endpoints answer 404. */
+  enabled: z.boolean().default(true),
+})
+
+export const securitySchema = z.object({
+  /** Auth-failure rate limiting (SE-1). `enabled: false` is the one-line
+   *  rollback to pre-M2 behavior. */
+  authRateLimit: z.object({
+    enabled: z.boolean().default(true),
+    maxFailures: z.number().int().positive().default(20),
+    windowMinutes: z.number().int().positive().default(15),
+    lockoutMinutes: z.number().int().positive().default(15),
+  }).default({ enabled: true, maxFailures: 20, windowMinutes: 15, lockoutMinutes: 15 }),
+})
+
 export const webSubchannelSchema = z.object({
   /** URL-safe identifier. Used as session path segment: data/sessions/web/{id}.jsonl */
   id: z.string().regex(/^[a-z0-9-_]+$/, 'id must be lowercase alphanumeric with hyphens/underscores'),
@@ -486,6 +489,8 @@ export type Config = {
   connectors: z.infer<typeof connectorsSchema>
   news: z.infer<typeof newsCollectorSchema>
   tools: z.infer<typeof toolsSchema>
+  metrics: z.infer<typeof metricsSchema>
+  security: z.infer<typeof securitySchema>
 }
 
 // ==================== Loader ====================
@@ -523,7 +528,7 @@ export async function loadConfig(): Promise<Config> {
   // is pending. See src/migrations/INDEX.md for the full list.
   await runMigrations()
 
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'snapshot.json', 'mcp.json', 'connectors.json', 'news.json', 'tools.json', 'trading.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'snapshot.json', 'mcp.json', 'connectors.json', 'news.json', 'tools.json', 'trading.json', 'metrics.json', 'security.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   const config: Config = {
@@ -540,6 +545,8 @@ export async function loadConfig(): Promise<Config> {
     news:          await parseAndSeed(files[10], newsCollectorSchema, raws[10]),
     tools:         await parseAndSeed(files[11], toolsSchema, raws[11]),
     trading:       await parseAndSeed(files[12], tradingSchema, raws[12]),
+    metrics:       await parseAndSeed(files[13], metricsSchema, raws[13]),
+    security:      await parseAndSeed(files[14], securitySchema, raws[14]),
   }
 
   // Spawn-time-fixed channel: when guardian (Electron main) spawns the
@@ -712,7 +719,7 @@ export async function readUTAsConfig(): Promise<UTAConfig[]> {
       // with an empty store so the app still boots.
       const quarantine = resolve(CONFIG_DIR, `accounts.json.sealed-unreadable-${Date.now()}`)
       await rename(resolve(CONFIG_DIR, 'accounts.json'), quarantine)
-      console.error(
+      log.error(
         `accounts.json could not be unsealed: ${err instanceof Error ? err.message : String(err)}\n` +
         `The file was preserved at ${quarantine}. Starting with an empty account store — ` +
         `re-enter broker credentials in Settings → Trading.`,
@@ -743,7 +750,7 @@ export async function readUTAsConfig(): Promise<UTAConfig[]> {
       }
     }
 
-    console.warn(
+    log.warn(
       `accounts.json: migrated ${migrated.length - skipped.length} legacy record(s) to preset shape ` +
       `(backup: ${backupPath}).` +
       (skipped.length ? ` Skipped (unknown engine, recreate manually): ${skipped.join(', ')}.` : ''),
@@ -788,7 +795,7 @@ export async function purgeEphemeralUTAs(utas: UTAConfig[]): Promise<UTAConfig[]
   if (ephemeral.length === 0) return utas
 
   for (const u of ephemeral) {
-    console.log(`startup: purging ephemeral UTA ${u.id}${u.label ? ` (${u.label})` : ''}`)
+    log.info(`startup: purging ephemeral UTA ${u.id}${u.label ? ` (${u.label})` : ''}`)
     await wipeUTATradingData(u.id)
   }
   const survivors = utas.filter((u) => u.ephemeral !== true)
@@ -1035,6 +1042,8 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   connectors: connectorsSchema,
   news: newsCollectorSchema,
   tools: toolsSchema,
+  metrics: metricsSchema,
+  security: securitySchema,
 }
 
 const sectionFiles: Record<ConfigSection, string> = {
@@ -1051,6 +1060,8 @@ const sectionFiles: Record<ConfigSection, string> = {
   connectors: 'connectors.json',
   news: 'news.json',
   tools: 'tools.json',
+  metrics: 'metrics.json',
+  security: 'security.json',
 }
 
 /** All valid config section names (derived from sectionSchemas). */

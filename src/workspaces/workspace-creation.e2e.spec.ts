@@ -1,3 +1,4 @@
+import { rmrf } from '@/spec-helpers/fs.js';
 /**
  * End-to-end check of the create flow, exercising the real moving parts in
  * order: bootstrap.mjs (run on the bundled Node + dugite's bundled git) →
@@ -8,7 +9,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,7 +91,7 @@ beforeEach(async () => {
   dir = join(parent, 'workspace');
 });
 afterEach(async () => {
-  await rm(parent, { recursive: true, force: true });
+  await rmrf(parent);
 });
 
 describe('chat workspace create: bootstrap → inject → commit', () => {

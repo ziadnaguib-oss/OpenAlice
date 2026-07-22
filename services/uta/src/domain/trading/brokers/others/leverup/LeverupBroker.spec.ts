@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import Decimal from 'decimal.js'
-import { Contract, Order, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { Contract, Order, } from '@traderalice/ibkr'
 import '../../../contract-ext.js'
 
 // Stable test private key for signature assertions (NOT a real wallet).
