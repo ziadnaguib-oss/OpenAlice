@@ -31,6 +31,7 @@
  * run — on boot any entry whose owner is gone is re-queued with attempt+1.
  */
 
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -53,20 +54,12 @@ export interface QueueSnapshot {
   lanes: LaneConfig
 }
 
-/** Is a process still alive? `kill(pid, 0)` probes without signalling. */
-function pidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    // EPERM means it exists but is owned by another user — still alive.
-    return (err as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
 export class TaskQueueStore {
   private lanesCache: LaneConfig | null = null
+  /** Unique to THIS process lifetime — stamped on every claim so reconcile can
+   *  tell "claimed by the live me" from "claimed by a dead previous process"
+   *  without trusting PID liveness (PIDs get reused after a reboot). */
+  private readonly ownerId = randomUUID()
 
   private constructor(
     private readonly root: string,
@@ -105,6 +98,22 @@ export class TaskQueueStore {
     await mkdir(this.root, { recursive: true })
     await writeFile(this.lanesFile(), JSON.stringify(cfg, null, 2) + '\n', 'utf8')
     this.lanesCache = cfg
+  }
+
+  /**
+   * The id of an ALREADY-ACTIVE (pending or running) task for this issue, or
+   * null. Used to keep per-issue enqueues idempotent: a scheduled issue that is
+   * blocked on a dependency must not accumulate a fresh copy every tick, and a
+   * chained follow-up must not double up with the issue's own schedule.
+   */
+  async activeTaskFor(wsId: string, issueId: string): Promise<string | null> {
+    for (const { task } of await this.listPending()) {
+      if (task.wsId === wsId && task.issueId === issueId) return task.id
+    }
+    for (const task of await this.listRunning()) {
+      if (task.wsId === wsId && task.issueId === issueId) return task.id
+    }
+    return null
   }
 
   /** Add a task. The filename encodes claim order, so no index is needed. */
@@ -162,6 +171,7 @@ export class TaskQueueStore {
     const running: RunningTask = {
       ...entry.task,
       claimedAt: Date.now(),
+      claimedBy: this.ownerId,
       claimedByPid: process.pid,
     }
     const dest = join(this.runningDir(), `${entry.task.id}.json`)
@@ -207,10 +217,14 @@ export class TaskQueueStore {
   }
 
   /**
-   * Boot reconcile: re-queue tasks whose claiming process is gone. Headless
-   * children die with their Alice, so an orphaned `running/` entry means the
-   * run never finished. Re-queued exactly once with attempt+1; a task that has
-   * exhausted its attempts is released (the registry records the interruption).
+   * Boot reconcile: re-queue tasks claimed by a PREVIOUS process. Headless
+   * children die with their Alice, so a `running/` entry not carrying this
+   * process's `ownerId` is from a crashed predecessor and its run never
+   * finished. Re-queued exactly once with attempt+1; a task that has exhausted
+   * its attempts is released (the registry records the interruption).
+   *
+   * Ownership is by nonce, never PID: a rebooted host reuses PIDs, so a dead
+   * owner's PID can read "alive" and silently defeat recovery.
    *
    * Returns the ids re-queued and abandoned, for logging/tests.
    */
@@ -218,7 +232,7 @@ export class TaskQueueStore {
     const requeued: string[] = []
     const abandoned: string[] = []
     for (const task of await this.listRunning()) {
-      if (task.claimedByPid === process.pid || pidAlive(task.claimedByPid)) continue
+      if (task.claimedBy === this.ownerId) continue // claimed by the live me
       if (task.attempt < task.maxAttempts) {
         await this.requeue(task, { attempt: task.attempt + 1, notBefore: Date.now() })
         requeued.push(task.id)

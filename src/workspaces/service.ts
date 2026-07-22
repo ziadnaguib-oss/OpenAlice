@@ -92,7 +92,11 @@ import {
  *  Exported for the /api/metrics capacity gauge. */
 export const MAX_CONCURRENT_HEADLESS = 8;
 
-/** Thrown by `dispatchHeadlessTask` when the concurrency cap is hit (→ HTTP 429). */
+/**
+ * Reserved for a future per-lane HARD cap that rejects rather than queues.
+ * No longer thrown since M4 — over-cap work now waits in the queue's `pending/`
+ * — but kept on the public surface for callers that still narrow on it.
+ */
 export class HeadlessCapacityError extends Error {
   constructor(public readonly limit: number) {
     super(`headless capacity reached (${limit} tasks running)`);
@@ -206,9 +210,9 @@ export interface WorkspaceService {
    */
   probeAgentRuntimeReadiness(agentId?: string): Promise<AgentRuntimeReadinessSnapshot>;
   /**
-   * ASYNC dispatch — records the task, spawns it in the background, returns the
-   * taskId immediately (the automation path). Throws `HeadlessCapacityError`
-   * when the concurrency cap is hit.
+   * ENQUEUE a headless run into the durable queue (M4) and return its task id
+   * immediately. The queue decides when it starts (lanes, priorities,
+   * `notBefore`); over-cap work waits in `pending/` rather than being rejected.
    */
   dispatchHeadlessTask(
     meta: WorkspaceMeta,
@@ -881,12 +885,6 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
   };
 
   /**
-   * ASYNC dispatch: record the task, spawn it in the background, return the
-   * taskId immediately. The record fills in on exit. This is the automation
-   * path (a trigger doesn't wait minutes for the run); the sync
-   * `runHeadlessTask` stays for the `wait:true` API mode + direct callers.
-   * Throws `HeadlessCapacityError` when too many tasks are already in flight.
-   */
   /**
    * Execute ONE claimed queue task (M4). The dispatch loop owns *when* this
    * runs; this owns *how*: mark the record running, spawn the headless CLI,
@@ -1005,6 +1003,19 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     if (!adapter.capabilities.headless || !adapter.composeHeadlessCommand) {
       throw new Error(`adapter "${adapter.id}" has no headless mode`);
     }
+    // Idempotent per issue: if this issue already has an active (queued or
+    // running) task, return it instead of enqueuing a duplicate. Without this a
+    // scheduled issue blocked on a dependency would accumulate a fresh copy
+    // every scanner tick, and a chained follow-up could double up with the
+    // issue's own schedule. Manual runs (no issueId) always create a new task.
+    if (issueId) {
+      const existing = await taskQueue.activeTaskFor(ws.id, issueId);
+      if (existing) {
+        launcherLogger.info('queue.enqueue_deduped', { wsId: ws.id, issueId, existing });
+        return { taskId: existing };
+      }
+    }
+
     // Fail fast at submission rather than discovering a missing credential
     // minutes later when the loop claims the task.
     await ensureAgentCredentialReady({
@@ -1082,6 +1093,9 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     logger: launcherLogger.child({ scope: 'queue' }),
     runTask: runQueuedTask,
     onTerminal: onQueueTerminal,
+    // Reset the run record to `queued` for the next attempt so the panel does
+    // not show a retrying task as failed-and-finished (QA H-1).
+    onRetry: (task, nextAttempt) => headlessTasks.requeueRecord(task.id, nextAttempt),
     dependenciesMet: async (wsId, issueIds) => {
       const ws = registry.get(wsId);
       if (!ws) return true; // workspace gone — do not block forever
@@ -1101,6 +1115,9 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       if (!res.ok) return null;
       const issue = res.issues.find((i) => i.id === issueId);
       if (!issue || isTerminalIssueStatus(issue.status)) return null;
+      // Do not double up with an already-active task for this issue (its own
+      // schedule may have enqueued it) — QA M-1.
+      if (await taskQueue.activeTaskFor(ws.id, issue.id)) return null;
       const adapter = resolveAdapter(ws, issue.agent ?? undefined);
       if (!adapter.capabilities.headless) return null;
       const id = randomUUID();

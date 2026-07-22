@@ -38,6 +38,12 @@ export interface DispatchLoopDeps {
   /** Build a follow-up task from a chain reference; null ⇒ nothing to enqueue. */
   buildChainTask?: (parent: QueueTask, issueId: string) => Promise<QueueTask | null>
   /**
+   * Called just before a retryable task is re-queued, with the NEXT attempt
+   * number. The owner uses it to reset the run record back to `queued` so the
+   * panel does not show a retrying task as failed-and-finished.
+   */
+  onRetry?: (task: RunningTask, nextAttempt: number) => Promise<void>
+  /**
    * Called once a task reaches a TERMINAL outcome (no retry left / not
    * retryable), after its queue entry is released. The owner uses it for
    * side-effects the queue must not know about — closing a one-shot issue.
@@ -141,8 +147,16 @@ export class QueueDispatchLoop {
     if (isRetryableOutcome(outcome) && task.attempt < task.maxAttempts) {
       // Exponential backoff expressed as a claim gate, so the delay survives a
       // restart (unlike M3's in-memory timer, which a shutdown silently lost).
+      const nextAttempt = task.attempt + 1
       const notBefore = this.now() + task.backoffMs * 2 ** (task.attempt - 1)
-      await this.deps.store.requeue(task, { attempt: task.attempt + 1, notBefore })
+      if (this.deps.onRetry) {
+        try {
+          await this.deps.onRetry(task, nextAttempt)
+        } catch (err) {
+          this.deps.logger.warn('queue.retry_hook_failed', { id: task.id, err })
+        }
+      }
+      await this.deps.store.requeue(task, { attempt: nextAttempt, notBefore })
       this.deps.logger.info('queue.retry_scheduled', {
         id: task.id, wsId: task.wsId, issueId: task.issueId,
         outcome, attempt: task.attempt, maxAttempts: task.maxAttempts, notBefore,

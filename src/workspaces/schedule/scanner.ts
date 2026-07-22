@@ -357,7 +357,12 @@ export class ScheduleScanner {
       priority: PRIORITY.cron,
       source: 'schedule' as const,
       ...(issue.lane ? { lane: issue.lane } : {}),
-      ...(issue.depends_on.length > 0 ? { dependsOn: issue.depends_on } : {}),
+      // Drop a self-reference — an issue depending on itself would deadlock
+      // (its own status is never terminal while it is trying to run).
+      ...(() => {
+        const deps = issue.depends_on.filter((d) => d !== issue.id)
+        return deps.length > 0 ? { dependsOn: deps } : {}
+      })(),
       ...(issue.chain ? { chain: issue.chain } : {}),
     }
     try {

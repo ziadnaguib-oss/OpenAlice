@@ -144,7 +144,7 @@ describe('crash reconcile', () => {
     const store = await open()
     const t = task({ id: 'orphan', attempt: 1, maxAttempts: 3 })
     // Simulate a previous Alice: a running entry owned by an impossible pid.
-    const dead: RunningTask = { ...t, claimedAt: Date.now() - 1000, claimedByPid: 0x7ffffff0 }
+    const dead: RunningTask = { ...t, claimedAt: Date.now() - 1000, claimedBy: 'dead-owner-nonce', claimedByPid: 0x7ffffff0 }
     await writeFile(join(root, 'running', 'orphan.json'), JSON.stringify(dead), 'utf8')
 
     const first = await store.reconcile()
@@ -160,6 +160,23 @@ describe('crash reconcile', () => {
     expect(await store.listPending()).toHaveLength(1)
   })
 
+  it('re-queues an orphan even when its recorded PID is ALIVE (PID reuse, QA M-2)', async () => {
+    // The killer case: after a crash+reboot the OS reuses PIDs, so a dead
+    // owner's PID can belong to a live process. Trusting PID liveness would
+    // leave the run stranded. Using process.pid (definitely alive) + a foreign
+    // owner nonce, reconcile must still recover it.
+    const store = await open()
+    const t = task({ id: 'reused-pid', attempt: 1, maxAttempts: 2 })
+    const orphan: RunningTask = {
+      ...t, claimedAt: 1, claimedBy: 'previous-process-nonce', claimedByPid: process.pid,
+    }
+    await writeFile(join(root, 'running', 'reused-pid.json'), JSON.stringify(orphan), 'utf8')
+    const res = await store.reconcile()
+    expect(res.requeued).toEqual(['reused-pid'])
+    expect(await store.listRunning()).toHaveLength(0)
+    expect((await store.listPending())[0]!.task.attempt).toBe(2)
+  })
+
   it('leaves tasks owned by THIS live process alone', async () => {
     const store = await open()
     const t = task({ id: 'mine' })
@@ -172,7 +189,7 @@ describe('crash reconcile', () => {
   it('abandons an orphan that has exhausted its attempts', async () => {
     const store = await open()
     const t = task({ id: 'spent', attempt: 3, maxAttempts: 3 })
-    const dead: RunningTask = { ...t, claimedAt: 1, claimedByPid: 0x7ffffff0 }
+    const dead: RunningTask = { ...t, claimedAt: 1, claimedBy: 'dead-owner-nonce', claimedByPid: 0x7ffffff0 }
     await writeFile(join(root, 'running', 'spent.json'), JSON.stringify(dead), 'utf8')
     const res = await store.reconcile()
     expect(res.abandoned).toEqual(['spent'])
@@ -197,6 +214,18 @@ describe('crash reconcile', () => {
     // And releasing sweeps the stale pending file so it cannot resurrect.
     await store.release('halfclaimed')
     expect(await store.listPending()).toHaveLength(0)
+  })
+
+  it('activeTaskFor finds a pending or running task by issue, ignoring other issues', async () => {
+    const store = await open()
+    await store.enqueue(task({ id: 'p1', wsId: 'w1', issueId: 'daily', createdAt: 1 }))
+    expect(await store.activeTaskFor('w1', 'daily')).toBe('p1')
+    expect(await store.activeTaskFor('w1', 'other')).toBeNull()
+    expect(await store.activeTaskFor('w2', 'daily')).toBeNull() // wrong ws
+    await store.claim((await store.listPending())[0]!)
+    expect(await store.activeTaskFor('w1', 'daily')).toBe('p1') // now running, still found
+    await store.release('p1')
+    expect(await store.activeTaskFor('w1', 'daily')).toBeNull() // gone
   })
 
   it('a corrupt pending file does not wedge the queue', async () => {

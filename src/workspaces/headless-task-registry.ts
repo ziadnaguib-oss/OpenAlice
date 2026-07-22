@@ -133,6 +133,29 @@ export class HeadlessTaskRegistry {
     await this.flush()
   }
 
+  /**
+   * Reset a record back to `queued` for the NEXT retry attempt (M4). The
+   * previous attempt already wrote a terminal record via `complete`; without
+   * this, `markRunning` (which only advances `queued → running`) would no-op on
+   * the retry and the panel would show the run as failed-and-finished while it
+   * is actually re-running. Clears the terminal fields and advances `attempt`.
+   */
+  async requeueRecord(taskId: string, attempt: number): Promise<void> {
+    const rec = this.tasks.find((t) => t.taskId === taskId)
+    if (!rec) return
+    rec.status = 'queued'
+    rec.attempt = attempt
+    delete rec.finishedAt
+    delete rec.durationMs
+    delete rec.exitCode
+    delete rec.signal
+    delete rec.killed
+    delete rec.killReason
+    delete rec.outcome
+    delete rec.error
+    await this.flush()
+  }
+
   async create(input: {
     wsId: string
     agent: string

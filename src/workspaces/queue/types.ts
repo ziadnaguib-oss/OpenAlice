@@ -49,7 +49,14 @@ export interface QueueTask {
 /** A claimed task, annotated with who owns it (for crash reconcile). */
 export interface RunningTask extends QueueTask {
   claimedAt: number
-  /** PID of the Alice process that claimed it. Its death orphans the run. */
+  /**
+   * Per-process boot nonce of the Alice that claimed it. Reconcile trusts THIS
+   * over a PID: PIDs are reused after a reboot, so a dead owner's PID can read
+   * "alive" and defeat recovery — but a nonce is unique per process lifetime,
+   * so any entry not carrying the current process's nonce is provably orphaned.
+   */
+  claimedBy: string
+  /** PID, for diagnostics only (never used for liveness — see claimedBy). */
   claimedByPid: number
 }
 

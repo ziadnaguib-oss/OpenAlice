@@ -120,6 +120,19 @@ describe('QueueDispatchLoop', () => {
     expect(pending[0]!.task.notBefore).toBe(now + 30_000)
   })
 
+  it('fires onRetry with the next attempt BEFORE re-queuing (QA H-1 wiring)', async () => {
+    const now = 1_000_000
+    const calls: Array<{ id: string; nextAttempt: number }> = []
+    const loop = loopWith(async () => 'error', {
+      now: () => now,
+      onRetry: async (t, nextAttempt) => { calls.push({ id: t.id, nextAttempt }) },
+    })
+    await store.enqueue(task({ id: 'r', attempt: 1, maxAttempts: 3 }))
+    await loop.tick()
+    await vi.waitFor(async () => expect(await store.listPending()).toHaveLength(1))
+    expect(calls).toEqual([{ id: 'r', nextAttempt: 2 }])
+  })
+
   it('stops retrying once attempts are exhausted', async () => {
     const loop = loopWith(async () => 'error')
     await store.enqueue(task({ id: 'x', attempt: 3, maxAttempts: 3 }))
@@ -190,7 +203,7 @@ describe('QueueDispatchLoop', () => {
   it('start() reconciles orphans from a dead process before ticking', async () => {
     const orphan: RunningTask = {
       ...task({ id: 'ghost', attempt: 1, maxAttempts: 2 }),
-      claimedAt: 1, claimedByPid: 0x7ffffff0,
+      claimedAt: 1, claimedBy: 'dead-owner-nonce', claimedByPid: 0x7ffffff0,
     }
     const { writeFile } = await import('node:fs/promises')
     await writeFile(join(root, 'running', 'ghost.json'), JSON.stringify(orphan), 'utf8')

@@ -333,6 +333,32 @@ per-issue frontmatter opts in; classification is additive metadata.
 > narrow on it), so the manual-dispatch route no longer 429s — queuing is the
 > better behaviour and is what the milestone asks for. UI queue view is API +
 > demo-handler only; the panel widget is a follow-up, as in M3.
+>
+> QA follow-up (same day): the adversarial review returned FAIL on one real
+> defect and several coverage gaps, all now closed.
+> - **H-1 — retry left the panel showing failed-then-finished.** A retrying run
+>   wrote a terminal registry record on the failed attempt, and `markRunning`
+>   (which only advances `queued → running`) no-oped on the re-run, so the UI
+>   showed a finished-failed run that was actually re-executing. Fixed by
+>   `requeueRecord`, wired through the dispatch loop's new `onRetry` hook, which
+>   resets the record to `queued`, advances `attempt`, and clears every terminal
+>   field. Now covered by registry unit tests **and** a real
+>   store↔loop↔registry integration spec (`queue/integration.spec.ts`) — the
+>   path every prior queue test had mocked away.
+> - **H-2 / M-1 — scheduled-issue and chain re-entry.** A slow scheduled scan
+>   could accumulate duplicate queue entries and a chain could double-enqueue;
+>   `activeTaskFor(wsId, issueId)` now dedupes at dispatch and in
+>   `buildChainTask`, and a self-referential `depends_on` is filtered so an
+>   issue cannot deadlock on itself.
+> - **M-2 — PID-reuse defeated crash recovery.** Boot reconcile trusted PID
+>   liveness; after a reboot the OS reuses PIDs, so a dead owner's PID can be
+>   alive and the run would be stranded. Ownership is now a per-process boot
+>   nonce (`claimedBy`), with PID kept only as a diagnostic. Regression spec
+>   proves an orphan with a *live* recorded PID but a foreign nonce is still
+>   re-queued.
+> - **M-3 / L-1 — cleanup.** The manual route reports `queued` (not `running`)
+>   to match the enqueue reality, and the dead `HeadlessCapacityError` 429 branch
+>   and its stale doc wording were removed.
 
 **Objectives.** Replace the flat 8-cap dispatch with the file-backed queue:
 lanes, priorities, retries, crash-safe claims, chaining. (ai-os-design § 5;
@@ -356,10 +382,11 @@ under `lanes.json` default (one global lane, cap 8) so behavior-compatible
 rollback = default config.
 
 **Acceptance criteria.**
-- [ ] two dispatchers cannot double-claim (spec with 100 iterations)
-- [ ] kill -9 during a run → next boot re-queues it exactly once
-- [ ] per-workspace serial lane: two issues in one ws never run concurrently
-- [ ] `chain.onSuccess` fires; `depends_on` gating holds work back
+- [x] two dispatchers cannot double-claim (spec with 100 iterations)
+- [x] kill -9 during a run → next boot re-queues it exactly once (nonce-based,
+  survives PID reuse)
+- [x] per-workspace serial lane: two issues in one ws never run concurrently
+- [x] `chain.onSuccess` fires; `depends_on` gating holds work back
 
 ---
 
